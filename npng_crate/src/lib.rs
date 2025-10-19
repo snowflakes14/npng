@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 #[allow(unused)]
+
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
@@ -33,6 +34,8 @@ pub mod tokio;
 pub mod types;
 mod utils;
 mod ver;
+mod addons;
+mod compress;
 
 #[derive(Debug, Clone)]
 pub enum Encoding {
@@ -454,6 +457,9 @@ pub fn decode_bytes_to_pixel_vec(
     match header_end_pos {
         Some(end) => {
             let header = &bytes[..end]; // header including FF FF FF FF FF FF
+            if header.len() > 8192 {
+                return Err(NPNGError::InvalidHeader("Header is too long".to_string())); // Return Err if header is too long (>8KB or KiB idk)
+            }
             let body = &bytes[end..bytes.len() - 20];
 
             hasher.update(header);
@@ -463,7 +469,7 @@ pub fn decode_bytes_to_pixel_vec(
                 return Err(NPNGError::InvalidChecksum("Image is corrupted".to_string())); // Return error if CRC32 does not match the CheckSum section
             }
 
-            // Deserialize the header into a Header struct
+            /* ===== Deserialize the header into a Header struct ===== */
             let header_decoded =
                 deserialize::<Header>(header.to_vec(), true).map_err(|e: NPNGError| {
                     NPNGError::InvalidHeader(format!("Header decoding error: {}", e))
@@ -481,12 +487,7 @@ pub fn decode_bytes_to_pixel_vec(
                     version_major: header_decoded.version_major, //=== Construct a structure with versions
                                                                  //===========================================================================
                 },
-                data: Metadata {
-                    created_in: header_decoded.metadata.created_in,
-                    width: header_decoded.metadata.width,
-                    height: header_decoded.metadata.height,
-                    extra: header_decoded.metadata.extra,
-                },
+                data: header_decoded.metadata,
             };
 
             let format = header_decoded.encoding_format.clone();
