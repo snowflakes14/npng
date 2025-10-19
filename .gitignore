@@ -1,0 +1,13 @@
+*.png
+.idea
+*.npng
+target
+*.dll
+*.so
+*.exe
+*.rlib
+*.d
+Cargo.lock
+*.pdb
+libnpng
+*.bak
