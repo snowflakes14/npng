@@ -34,8 +34,6 @@ pub mod tokio;
 pub mod types;
 mod utils;
 mod ver;
-mod addons;
-mod compress;
 
 #[derive(Debug, Clone)]
 pub enum Encoding {
