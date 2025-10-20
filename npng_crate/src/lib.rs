@@ -1,6 +1,5 @@
 #[allow(dead_code)]
 #[allow(unused)]
-
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
@@ -16,21 +15,19 @@ use log::warn;
 
 pub use crate::error::NPNGError;
 use crate::{
-    coding::{
-        spawn_plain_decode_workers, spawn_plain_workers, spawn_zlib_decode_workers,
-        spawn_zlib_workers, spawn_zstd_decode_workers, spawn_zstd_workers,
-    },
-    types::{CheckSum, EncoderVersion, Header, Img, Metadata, Pixel},
+    coding::{spawn_plain_decode_workers, spawn_plain_workers},
+    types::{CheckSum, EncoderVersion, Header, Img, IntoCompressMap, Metadata, Pixel},
     utils::{check_image_size_f, deserialize, serialize},
     ver::{VERSION_MAJOR, VERSION_MINOR},
 };
 
 mod coding;
-mod error;
+pub mod error;
 
 #[cfg(feature = "tokio_async")]
 pub mod tokio;
 
+pub mod compress;
 pub mod types;
 mod utils;
 mod ver;
@@ -65,19 +62,15 @@ pub fn version() -> EncoderVersion {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Config {
     pub save_alpha: bool,
     pub varint: bool,
-    pub encoding: Encoding,
 }
 
 impl Config {
-    pub fn new(save_alpha: bool, varint: bool, encoding: Encoding) -> Self {
-        Self {
-            save_alpha,
-            varint,
-            encoding,
-        }
+    pub fn new(save_alpha: bool, varint: bool) -> Self {
+        Self { save_alpha, varint }
     }
 }
 
@@ -86,37 +79,42 @@ impl Default for Config {
         Self {
             varint: false,
             save_alpha: true,
-            encoding: Encoding::default(),
         }
     }
 }
 
-/// Encodes a vector of pixels along with metadata into NPNG bytes.
+/// Encodes a vector of pixels with metadata into NPNG bytes.
 ///
 /// # Parameters
-/// - `pixels` - Vector of pixels to encode (Vec<[`Pixel`]>).
-/// - `metadata` - Image [`Metadata`].
-/// - `config` - [`Config`] containing encoding options:
+/// - `pixels` - Vector of pixels to encode (`Vec<Pixel>`).
+/// - `metadata` - Image metadata [`Metadata`]. The width and height will be updated
+///   automatically based on the pixels.
+/// - `config` - Encoding options [`Config`]:
+///     - `save_alpha` - Whether to include the alpha channel in the output. Fully opaque
+///       pixels may be skipped if false.
+///     - `varint` - Whether to use variable-length integer encoding for pixel data.
+/// - `compress_map` - Compression map
 ///
-/// ## Config options
-/// - `save_alpha` - Save alpha channel. Fully opaque pixels may be skipped.
-/// - `varint` - Use variable-length integer encoding (varint).  
-/// - `encoding` - Pixel encoding/compression method ([`Encoding`]):
-///     - [`Encoding::Plain`] - Pixels are stored without compression.
-///     - [`Encoding::Zlib`]  - Pixels are compressed using the zlib algorithm.
-///     - [`Encoding::Zstd`]  - Pixels are compressed using the zstd algorithm.
+/// # Behavior
+/// 1. Checks the image size from the pixels and updates `metadata.width` and `metadata.height`.
+/// 2. Ensures there are no duplicate pixel coordinates; returns an error if duplicates exist.
+/// 3. Prepares a buffer, encodes the header, and checks its size.
+/// 4. Encodes pixels using plain workers, applying `save_alpha` and `varint` options.
+/// 5. Compresses the pixel data using [`CompressMap`].
+/// 6. Calculates and appends a CRC32 checksum for integrity verification.
 ///
 /// # Returns
-/// - `Ok(Vec<u8>)` - Encoded NPNG bytes.
-/// - `Err(NPNGError)` - An error occurred during encoding.
+/// - `Ok(Vec<u8>)` - Encoded NPNG bytes ready for storage or transmission.
+/// - `Err(NPNGError)` - If encoding fails, duplicate pixels are found, or the header is too long.
 pub fn encode_pixel_vec_with_metadata(
     pixels: Vec<Pixel>,
     mut metadata: Metadata,
     config: Config,
+    compress_map: impl IntoCompressMap,
 ) -> Result<Vec<u8>, NPNGError> {
+    let compress_map = compress_map.into_compress_map()?;
     let save_alpha = config.save_alpha;
     let varint = config.varint;
-    let encoding = config.encoding;
     let mut hasher = Hasher::new();
 
     /* ===== Calculating image size ===== */
@@ -141,7 +139,8 @@ pub fn encode_pixel_vec_with_metadata(
     let mut buf = Vec::new();
 
     /* ===== Encode header ===== */
-    let header = Header::new(encoding.to_string(), metadata.clone(), save_alpha, varint)?;
+    let encoder = compress_map.encoder();
+    let header = Header::new(encoder, metadata.clone(), save_alpha, varint)?;
     let ser_header = serialize(&header, true)?;
     if ser_header.len() > 10_000 {
         return Err(NPNGError::Error("Header is too long".to_string()));
@@ -149,14 +148,11 @@ pub fn encode_pixel_vec_with_metadata(
     buf.extend(ser_header);
 
     // ===== Encode pixels =====
-    let pixels_encoded = match encoding {
-        Encoding::Plain => spawn_plain_workers(pixels, save_alpha, varint)?,
-        Encoding::Zlib(level) => spawn_zlib_workers(pixels, level as u32, save_alpha, varint)?,
-        Encoding::Zstd(level) => spawn_zstd_workers(pixels, level as u32, save_alpha, varint)?,
-    };
+    let pixels_encoded = spawn_plain_workers(pixels, config.save_alpha, config.varint)?;
+    let pixels_encoded = compress_map.compress(pixels_encoded.as_slice())?;
 
     /* ===== Calculate and encode CRC32 ===== */
-    buf.extend(pixels_encoded);
+    buf.extend(pixels_encoded.1);
     hasher.update(buf.as_slice());
     let crc32 = hasher.finalize();
     buf.extend(serialize(
@@ -177,25 +173,31 @@ pub fn encode_pixel_vec_with_metadata(
 ///
 /// # Parameters
 /// - `input` - Path to the input image file.
-/// - `metadata` - Image [`Metadata`].
-/// - `config` - [`Config`] containing encoding options:
+/// - `metadata` - Image metadata (`Metadata`). The width and height will be updated
+///   based on the actual image dimensions.
+/// - `config` - Encoding options (`Config`):
+///     - `save_alpha` - Whether to include the alpha channel in the output. Fully opaque
+///       pixels may be skipped if false to reduce size.
+///     - `varint` - Use variable-length integer encoding for pixel data.
+/// - `compress_map` - Compression context used for encoding pixel data and header.
 ///
-/// ## Config options
-/// - `save_alpha` - Save alpha channel. Fully opaque pixels may be skipped to optimize size.
-/// - `varint` - Use variable-length integer encoding (varint).  
-/// - `encoding` - Pixel encoding/compression method ([`Encoding`]):
-///     - [`Encoding::Plain`] - Pixels are stored without compression.
-///     - [`Encoding::Zlib`]  - Pixels are compressed using the zlib algorithm.
-///     - [`Encoding::Zstd`]  - Pixels are compressed using the zstd algorithm.
+/// # Behavior
+/// 1. Opens the image file and decodes it into pixels.
+/// 2. Converts each pixel to RGBA and packs it into a `Pixel` structure.
+/// 3. Updates `metadata.width` and `metadata.height` to match the image.
+/// 4. Calls `encode_pixel_vec_with_metadata` to encode pixels, applying the `config` options
+///    and compression.
 ///
 /// # Returns
-/// - `Ok(Vec<u8>)` - Encoded NPNG bytes.
-/// - `Err(NPNGError)` - An error occurred during encoding.
+/// - `Ok(Vec<u8>)` - Encoded NPNG bytes ready for storage or transmission.
+/// - `Err(NPNGError)` - If opening, decoding, or encoding the image fails.
 pub fn encode_image_to_npng_bytes<P: AsRef<OsStr>>(
     input: P,
     mut metadata: Metadata,
     config: Config,
+    compress_map: impl IntoCompressMap,
 ) -> Result<Vec<u8>, NPNGError> {
+    let compress_map = compress_map.into_compress_map()?;
     /* ===== Open Image ===== */
     let img = ImageReader::open(Path::new(&input))
         .map_err(|e| NPNGError::Error(format!("Failed to open image: {}", e)))?
@@ -231,22 +233,29 @@ pub fn encode_image_to_npng_bytes<P: AsRef<OsStr>>(
     metadata.width = width as u16;
     metadata.height = height as u16;
 
-    encode_pixel_vec_with_metadata(pixels, metadata, config)
+    encode_pixel_vec_with_metadata(pixels, metadata, config, compress_map)
 }
 
-/// This function encodes image (e.g png, jpg) to npng `Img`
-/// # Img
-/// - `Pixels`: `Vec` with `Pixels`: { x, y, color }
-/// - [`EncoderVersion`]: Struct with versions (version_major, version_minor)
-/// - `data`: [`Metadata`]
+/// Encodes an image file (e.g., PNG, JPG) into an NPNG `Img` structure.
+///
+/// # Img Structure
+/// - `pixels` - `Vec<Pixel>` containing all pixels: `{ x, y, color }`
+/// - `encoder_version` - [`EncoderVersion`] struct with `version_major` and `version_minor`
+/// - `data` - [`Metadata`] containing image dimensions and other info
 ///
 /// # Parameters
-/// - `input` - input file path
-/// - `metadata` - Image [`Metadata`]
+/// - `input` - Path to the input image file.
+/// - `metadata` - Image [`Metadata`]. The width and height will be updated to match the image.
+///
+/// # Behavior
+/// 1. Opens and decodes the image file.
+/// 2. Converts each pixel to RGBA and packs it into a `Pixel` structure.
+/// 3. Updates `metadata.width` and `metadata.height`.
+/// 4. Returns an `Img` containing all pixels, encoder version, and metadata.
 ///
 /// # Returns
-/// - `Ok(Img)` - [`Img`]
-/// - `Err(NPNGError)` - Error
+/// - `Ok(Img)` - Encoded image as an `Img` structure ready for further processing or encoding.
+/// - `Err(NPNGError)` - If opening, decoding, or processing the image fails.
 pub fn encode_image_to_npng_pixels<P: AsRef<OsStr>>(
     input: P,
     mut metadata: Metadata,
@@ -297,32 +306,41 @@ pub fn encode_image_to_npng_pixels<P: AsRef<OsStr>>(
     })
 }
 
-/// This function encodes pixel vec (with [`Metadata`]) to .npng image
+/// Encodes a vector of pixels (with [`Metadata`]) into a `.npng` image file.
 ///
 /// # Parameters
-/// - `output`: output file path
-/// - [`Metadata`] - Image Metadata
-/// - pixels: [`Pixel`] Vec
-/// - overwrite: overwrite image or no
-/// - [`Config`] - config
-/// ## Config options
-/// - `save_alpha` - Save alpha channel. Fully opaque pixels may be skipped to optimize size.
-/// - `varint` - Use variable-length integer encoding (varint).  
-/// - `encoding` - Pixel encoding/compression method ([`Encoding`]):
-///     - [`Encoding::Plain`] - Pixels are stored without compression.
-///     - [`Encoding::Zlib`]  - Pixels are compressed using the zlib algorithm.
-///     - [`Encoding::Zstd`]  - Pixels are compressed using the zstd algorithm.
+/// - `output` - Path to the output `.npng` file.
+/// - `metadata` - Image [`Metadata`] containing width, height, and other info.
+/// - `pixels` - Vector of [`Pixel`] structures representing the image pixels.
+/// - `overwrite` - If `true`, an existing file at `output` will be overwritten; otherwise, the function exits early.
+/// - `config` - [`Config`] containing encoding options:
+///     - `save_alpha` - Whether to save the alpha channel. Fully opaque pixels may be skipped to reduce file size.
+///     - `varint` - Use variable-length integer encoding for pixel data.
+///     - `encoding` - Pixel compression method ([`Encoding`]):
+///         - [`Encoding::Plain`] - No compression.
+///         - [`Encoding::Zlib`]  - Compress using zlib.
+///         - [`Encoding::Zstd`]  - Compress using zstd.
+/// - `compress_map` - Compression context used for encoding the pixel data and header.
+///
+/// # Behavior
+/// 1. Checks if the output file exists and respects the `overwrite` flag.
+/// 2. Encodes the pixel vector with `metadata` using `encode_pixel_vec_with_metadata`, applying `config` options and compression.
+/// 3. Writes the resulting NPNG bytes to the output file.
 ///
 /// # Returns
-/// - Ok(()) - success encoding
-/// - Err(NPNGError) - Error
+/// - `Ok(())` - Image successfully encoded and saved.
+/// - `Err(NPNGError)` - If encoding fails or writing to the file fails.
+
 pub fn encode_pixel_vec_to_npng_image<O: AsRef<OsStr>>(
     output: O, // output file path
     metadata: Metadata,
     pixels: Vec<Pixel>,
     overwrite: bool,
     config: Config,
+    compress_map: impl IntoCompressMap,
 ) -> Result<(), NPNGError> {
+    let compress_map = compress_map.into_compress_map()?;
+
     let path = Path::new(&output);
 
     // Check if the file already exists
@@ -331,7 +349,7 @@ pub fn encode_pixel_vec_to_npng_image<O: AsRef<OsStr>>(
     }
 
     /* ===== Encode pixels ===== */
-    let ser = encode_pixel_vec_with_metadata(pixels, metadata, config)?;
+    let ser = encode_pixel_vec_with_metadata(pixels, metadata, config, compress_map)?;
 
     /* ===== Save encoded pixels ===== */
     let mut file = File::options()
@@ -345,32 +363,40 @@ pub fn encode_pixel_vec_to_npng_image<O: AsRef<OsStr>>(
     Ok(())
 }
 
-/// This function encodes image (e.g png, jpg) to npng image
+/// Encodes an image file (e.g., PNG, JPG) into an NPNG image file.
 ///
 /// # Parameters
-/// - `input`: Input image
-/// - `output`: Output npng file path
-/// - [`Metadata`] - Metadata
-/// - `overwrite`: overwrite image or no
-/// - config - [`Config`]
-/// ## Config options
-/// - `save_alpha` - Save alpha channel. Fully opaque pixels may be skipped to optimize size.
-/// - `varint` - Use variable-length integer encoding (varint).  
-/// - `encoding` - Pixel encoding/compression method ([`Encoding`]):
-///     - [`Encoding::Plain`] - Pixels are stored without compression.
-///     - [`Encoding::Zlib`]  - Pixels are compressed using the zlib algorithm.
-///     - [`Encoding::Zstd`]  - Pixels are compressed using the zstd algorithm.
+/// - `input` - Path to the input image file.
+/// - `output` - Path to the output `.npng` file.
+/// - `metadata` - Image [`Metadata`] containing width, height, and other info.
+/// - `overwrite` - If `true`, an existing output file will be overwritten; otherwise, the function exits early.
+/// - `config` - [`Config`] containing encoding options:
+///     - `save_alpha` - Whether to save the alpha channel. Fully opaque pixels may be skipped to reduce file size.
+///     - `varint` - Use variable-length integer encoding for pixel data.
+///     - `encoding` - Pixel compression method ([`Encoding`]):
+///         - [`Encoding::Plain`] - No compression.
+///         - [`Encoding::Zlib`]  - Compress using zlib.
+///         - [`Encoding::Zstd`]  - Compress using zstd.
+/// - `compress_map` - Compression context used for encoding pixel data and header.
+///
+/// # Behavior
+/// 1. Checks if the output file exists and respects the `overwrite` flag.
+/// 2. Reads and decodes the input image, converts it to pixels, and encodes it into NPNG bytes.
+/// 3. Writes the encoded NPNG bytes to the specified output file.
 ///
 /// # Returns
-/// - Ok(()) - success encoding
-/// - Err(NPNGError) - Error
+/// - `Ok(())` - Image successfully encoded and saved.
+/// - `Err(NPNGError)` - If reading, decoding, encoding, or writing fails.
 pub fn encode_image_to_npng_image<I: AsRef<OsStr>, O: AsRef<OsStr>>(
     input: I,
     output: O,
     metadata: Metadata,
     overwrite: bool,
     config: Config,
+    compress_map: impl IntoCompressMap,
 ) -> Result<(), NPNGError> {
+    let compress_map = compress_map.into_compress_map()?;
+
     let path = Path::new(&output);
 
     // Check if the file already exists
@@ -379,7 +405,7 @@ pub fn encode_image_to_npng_image<I: AsRef<OsStr>, O: AsRef<OsStr>>(
     }
 
     /* ===== Encode image into npng ===== */
-    let ser = encode_image_to_npng_bytes(input, metadata, config)?;
+    let ser = encode_image_to_npng_bytes(input, metadata, config, compress_map)?;
 
     /* ===== Save encoded pixels ===== */
     let mut file = OpenOptions::new()
@@ -393,25 +419,38 @@ pub fn encode_image_to_npng_image<I: AsRef<OsStr>, O: AsRef<OsStr>>(
     Ok(())
 }
 
-/// This function decodes bytes to [`Pixel`] Vec with metadata ([`Img`])
-/// # Img
-/// - `Pixels`: `Vec` with `Pixels`: { x, y, color }
-/// - [`EncoderVersion`]: Struct with versions (version_major, version_minor)
-/// - `data`: [`Metadata`]
+/// Decodes NPNG bytes into a vector of [`Pixel`]s along with metadata (`Img`).
+///
+/// # Img Structure
+/// - `pixels` - `Vec<Pixel>` containing all pixels: `{ x, y, color }`
+/// - `encoder_version` - [`EncoderVersion`] struct with `version_major` and `version_minor`
+/// - `data` - [`Metadata`] containing image dimensions and other info
 ///
 /// # Parameters
-/// - `bytes`: Slice with bytes
-/// - `check_image_size`: check decoded bytes image size
-/// - `ignore_checksum`: ignore crc32 (totally not recommended)
+/// - `bytes` - Slice of bytes representing the encoded NPNG image.
+/// - `check_image_size` - If `true`, the function will recalculate and validate the image dimensions after decoding.
+/// - `ignore_checksum` - If `true`, CRC32 checksum verification will be skipped (not recommended).
+/// - `compress_map` - Compression context used to decompress the pixel data and header.
+///
+/// # Behavior
+/// 1. Checks the header length and verifies magic bytes to ensure it is a valid NPNG file.
+/// 2. Extracts and optionally verifies the CRC32 checksum.
+/// 3. Locates the end of the header and deserializes it into a `Header` struct.
+/// 4. Checks version compatibility and reads header flags (`alpha` and `varint`).
+/// 5. Decompresses the pixel data using `compress_map` and decodes pixels into a `Vec<Pixel>`.
+/// 6. Updates `metadata.width` and `metadata.height` if `check_image_size` is `true`.
 ///
 /// # Returns
-/// - Ok(Img) - Success decoding
-/// - Err(NPNGError) - Error
+/// - `Ok(Img)` - Successfully decoded image as an `Img` structure.
+/// - `Err(NPNGError)` - If the header is invalid, checksum fails, decompression fails, or pixel decoding fails.
 pub fn decode_bytes_to_pixel_vec(
     bytes: &[u8],
     check_image_size: bool,
     ignore_checksum: bool,
+    compress_map: impl IntoCompressMap,
 ) -> Result<Img, NPNGError> {
+    let compress_map = compress_map.into_compress_map()?;
+
     /* ===== Check header len ===== */
     if bytes.len() < 9 {
         return Err(NPNGError::InvalidHeader("Header is too short".to_string()));
@@ -455,8 +494,8 @@ pub fn decode_bytes_to_pixel_vec(
     match header_end_pos {
         Some(end) => {
             let header = &bytes[..end]; // header including FF FF FF FF FF FF
-            if header.len() > 8192 {
-                return Err(NPNGError::InvalidHeader("Header is too long".to_string())); // Return Err if header is too long (>8KB or KiB idk)
+            if header.len() > 10_000 {
+                return Err(NPNGError::InvalidHeader("Header is too long".to_string())); // Return Err if header is too long (>10KB)
             }
             let body = &bytes[end..bytes.len() - 20];
 
@@ -489,60 +528,44 @@ pub fn decode_bytes_to_pixel_vec(
             };
 
             let format = header_decoded.encoding_format.clone();
-            match format.as_str() {
-                "plain" => {
-                    let d = spawn_plain_decode_workers(body.to_vec(), save_alpha, varint)?;
-                    result.pixels = d.clone();
-                    if check_image_size {
-                        let s = check_image_size_f(d);
-                        result.data.width = s.0;
-                        result.data.height = s.1;
-                    }
-                    Ok(result)
-                }
-                "deflate" => {
-                    let d = spawn_zlib_decode_workers(body, save_alpha, varint)?;
-                    result.pixels = d.clone();
-                    if check_image_size {
-                        let s = check_image_size_f(d);
-                        result.data.width = s.0;
-                        result.data.height = s.1;
-                    }
-                    Ok(result)
-                }
-                "zstd" => {
-                    let d = spawn_zstd_decode_workers(body, save_alpha, varint)?;
-                    result.pixels = d.clone();
-                    if check_image_size {
-                        let s = check_image_size_f(d);
-                        result.data.width = s.0;
-                        result.data.height = s.1;
-                    }
-                    Ok(result)
-                }
-                e => Err(NPNGError::Error(format!("Unknown encoding format: {e}"))),
+            let uncompressed = compress_map.decompress(body, format.as_str())?;
+            let decoded = spawn_plain_decode_workers(uncompressed, save_alpha, varint)?;
+            if check_image_size {
+                let real_size = check_image_size_f(decoded);
+                result.data.width = real_size.0;
+                result.data.height = real_size.1;
             }
+            Ok(result)
         }
         None => Err(NPNGError::Error("Invalid header".to_string())),
     }
 }
 
-/// This function decodes npng bytes to image (e.g png, jpg)
+/// Decodes NPNG bytes into a standard image file (e.g., PNG, JPG) and saves it.
 ///
 /// # Parameters
-/// - `bytes`: Slice with bytes
-/// - `output`: Output file path
-/// - `ignore_checksum`: ignore crc32 (totally not recommended)
+/// - `bytes` - Slice of bytes representing the encoded NPNG image.
+/// - `output` - Path to the output image file.
+/// - `ignore_checksum` - If `true`, CRC32 checksum verification will be skipped (not recommended).
+/// - `compress_map` - Compression context used to decompress the pixel data and header.
+///
+/// # Behavior
+/// 1. Decodes NPNG bytes into pixels and metadata using `decode_bytes_to_pixel_vec`.
+/// 2. Creates an `ImageBuffer` and populates it with decoded RGBA pixel data.
+/// 3. Saves the buffer to the specified output file path.
 ///
 /// # Returns
-/// - `Ok((EncoderVersion, Metadata))` - tuple with [`EncoderVersion`] and [`Metadata`]
-/// - `Err(NPNGError)` - Error
+/// - `Ok((EncoderVersion, Metadata))` - Tuple containing the encoder version and image metadata.
+/// - `Err(NPNGError)` - If decoding fails or saving the image fails.
 pub fn decode_bytes_to_image<O: AsRef<OsStr>>(
     bytes: &[u8],
     output: O,
     ignore_checksum: bool,
+    compress_map: impl IntoCompressMap,
 ) -> Result<(EncoderVersion, Metadata), NPNGError> {
-    let img = decode_bytes_to_pixel_vec(bytes, true, ignore_checksum)?;
+    let compress_map = compress_map.into_compress_map()?;
+
+    let img = decode_bytes_to_pixel_vec(bytes, true, ignore_checksum, compress_map)?;
     let metadata = img.data.clone();
     let version = img.encoder_version.clone();
 
@@ -573,39 +596,84 @@ pub fn decode_bytes_to_image<O: AsRef<OsStr>>(
     Ok((version, metadata))
 }
 
-/// This function decodes npng file to image (e.g png, jpg)
+/// Decodes an NPNG file into a standard image file (e.g., PNG, JPG) and saves it.
 ///
 /// # Parameters
-/// - `input` - input file path
-/// - `output` - output file path
-/// - `ignore_checksum`: ignore crc32 (totally not recommended)
+/// - `input` - Path to the input `.npng` file.
+/// - `output` - Path to the output image file.
+/// - `ignore_checksum` - If `true`, CRC32 checksum verification will be skipped (not recommended).
+/// - `compress_map` - Compression context used to decompress the pixel data and header.
+///
+/// # Behavior
+/// 1. Reads the NPNG file from the specified input path.
+/// 2. Decodes the bytes into pixels and metadata using `decode_bytes_to_image`.
+/// 3. Saves the resulting image to the specified output path.
 ///
 /// # Returns
-/// - `Ok((EncoderVersion, Metadata))` - tuple with [`EncoderVersion`] and [`Metadata`]
-/// - `Err(NPNGError)` - Error
+/// - `Ok((EncoderVersion, Metadata))` - Tuple containing the encoder version and image metadata.
+/// - `Err(NPNGError)` - If reading, decoding, or saving the image fails.
 pub fn decode_npng_image_to_image<I: AsRef<OsStr>, O: AsRef<OsStr>>(
     input: I,
     output: O,
     ignore_checksum: bool,
+    compress_map: impl IntoCompressMap,
 ) -> Result<(EncoderVersion, Metadata), NPNGError> {
+    let compress_map = compress_map.into_compress_map()?;
+
     let buf = std::fs::read(Path::new(input.as_ref()))?;
-    decode_bytes_to_image(&buf, output, ignore_checksum)
+    decode_bytes_to_image(&buf, output, ignore_checksum, compress_map)
 }
 
+/// Decodes an NPNG file into a vector of [`Pixel`]s and metadata ([`Img`]).
+///
+/// # Parameters
+/// - `input` - Path to the input `.npng` file.
+/// - `check_image_size` - If `true`, the function will recalculate and validate the image dimensions after decoding.
+/// - `ignore_checksum` - If `true`, CRC32 checksum verification will be skipped (not recommended).
+/// - `compress_map` - Compression context used to decompress the pixel data and header.
+///
+/// # Behavior
+/// 1. Reads the NPNG file from the specified path.
+/// 2. Decodes the bytes into pixels and metadata using `decode_bytes_to_pixel_vec`, applying checksum verification and image size checks according to the parameters.
+///
+/// # Returns
+/// - `Ok(Img)` - Successfully decoded image as an `Img` structure containing pixels and metadata.
+/// - `Err(NPNGError)` - If reading the file, decoding, or decompression fails.
 pub fn decode_npng_file_to_pixels<I: AsRef<OsStr>>(
     input: I,
     check_image_size: bool,
     ignore_checksum: bool,
+    compress_map: impl IntoCompressMap,
 ) -> Result<Img, NPNGError> {
+    let compress_map = compress_map.into_compress_map()?;
+
     let buf = std::fs::read(Path::new(input.as_ref()))?;
-    decode_bytes_to_pixel_vec(&buf, check_image_size, ignore_checksum)
+    decode_bytes_to_pixel_vec(&buf, check_image_size, ignore_checksum, compress_map)
 }
 
+/// Decodes NPNG bytes into an `ImageBuffer` and returns the image metadata.
+///
+/// # Parameters
+/// - `bytes` - Slice of bytes representing the encoded NPNG image.
+/// - `ignore_checksum` - If `true`, CRC32 checksum verification will be skipped (not recommended).
+/// - `compress_map` - Compression context used to decompress the pixel data and header.
+///
+/// # Behavior
+/// 1. Decodes the NPNG bytes into pixels and metadata using `decode_bytes_to_pixel_vec`.
+/// 2. Creates an `ImageBuffer<Rgba<u8>, Vec<u8>>` and populates it with decoded pixel data.
+/// 3. Returns the image buffer along with the metadata.
+///
+/// # Returns
+/// - `Ok((ImageBuffer<Rgba<u8>, Vec<u8>>, Metadata))` - Decoded image buffer and metadata.
+/// - `Err(NPNGError)` - If decoding or decompression fails.
 pub fn decode_npng_bytes_to_image_buffer(
     bytes: &[u8],
     ignore_checksum: bool,
+    compress_map: impl IntoCompressMap,
 ) -> Result<(ImageBuffer<Rgba<u8>, Vec<u8>>, Metadata), NPNGError> {
-    let img = decode_bytes_to_pixel_vec(bytes, true, ignore_checksum)?;
+    let compress_map = compress_map.into_compress_map()?;
+
+    let img = decode_bytes_to_pixel_vec(bytes, true, ignore_checksum, compress_map)?;
 
     let width = img.data.width as u32;
     let height = img.data.height as u32;
@@ -627,13 +695,33 @@ pub fn decode_npng_bytes_to_image_buffer(
     Ok((buffer, img.data))
 }
 
+/// Decodes an NPNG file into a raw RGBA byte vector along with image dimensions.
+///
+/// # Parameters
+/// - `input` - Path to the input `.npng` file.
+/// - `ignore_checksum` - If `true`, CRC32 checksum verification will be skipped (not recommended).
+/// - `compress_map` - Compression context used to decompress the pixel data and header.
+///
+/// # Behavior
+/// 1. Reads the NPNG file from the specified path.
+/// 2. Decodes the bytes into an `ImageBuffer` using `decode_npng_bytes_to_image_buffer`.
+/// 3. Converts the `ImageBuffer` into a flat `Vec<u8>` in RGBA order.
+/// 4. Returns the raw byte vector along with the width and height of the image.
+///
+/// # Returns
+/// - `Ok((Vec<u8>, u32, u32))` - Raw RGBA bytes, width, and height of the decoded image.
+/// - `Err(NPNGError)` - If reading, decoding, or decompression fails.
 pub fn decode_npng_file_to_rgba_vec<I: AsRef<OsStr>>(
     input: I,
     ignore_checksum: bool,
+    compress_map: impl IntoCompressMap,
 ) -> Result<(Vec<u8>, u32, u32), NPNGError> {
+    let compress_map = compress_map.into_compress_map()?;
+
     let (buffer, _) = decode_npng_bytes_to_image_buffer(
         &std::fs::read(Path::new(input.as_ref()))?,
         ignore_checksum,
+        compress_map,
     )?;
     let width = buffer.width();
     let height = buffer.height();
@@ -647,69 +735,137 @@ pub fn decode_npng_file_to_rgba_vec<I: AsRef<OsStr>>(
 mod tests {
     use std::{collections::HashMap, fs, path::Path};
 
-    use image::io::Reader as ImageReader;
+    use image::ImageReader;
 
     use super::*;
+    use crate::compress::CompressMap;
 
     fn require_in_png() {
         let p = Path::new("in.png");
+        println!("in.png!");
         assert!(p.exists(), "in.png not found");
     }
 
-    #[test]
-    fn test_encode_image_to_npng_image_creates_file() {
-        require_in_png();
-
-        let metadata = Metadata::new_str("TEST", HashMap::new());
-
-        let out_path = "out.npng";
-
-        if Path::new(out_path).exists() {
-            let _ = fs::remove_file(out_path);
-        }
-
-        encode_image_to_npng_image("in.png", out_path, metadata, true, Config::default())
-            .expect("encode_image_to_npng_image failed.");
-
-        let md = fs::metadata(out_path).expect("cannot read out.npng");
-        assert!(md.len() > 0, "out.npng is empty");
-
-        let _ = fs::remove_file(out_path);
+    fn get_test_configs() -> Vec<Config> {
+        vec![
+            Config {
+                save_alpha: true,
+                varint: true,
+            },
+            Config {
+                save_alpha: true,
+                varint: false,
+            },
+            Config {
+                save_alpha: false,
+                varint: true,
+            },
+            Config {
+                save_alpha: false,
+                varint: false,
+            },
+        ]
     }
 
     #[test]
-    fn test_encode_bytes_and_decode_bytes_roundtrip() {
+    fn test_encode_image_to_npng_image_with_configs() {
         require_in_png();
+        let metadata = Metadata::new_str("TEST", HashMap::new());
+        let out_path = "out.npng";
 
+        let compress_maps = vec![
+            CompressMap::plain(),
+            CompressMap::zlib(3),
+            CompressMap::zstd(1),
+        ];
+
+        for (i, config) in get_test_configs().iter().enumerate() {
+            println!(
+                "==> Config {}: save_alpha={}, varint={}",
+                i, config.save_alpha, config.varint
+            );
+
+            for (j, cmap) in compress_maps.iter().enumerate() {
+                println!("  -- Using CompressMap #{}: encoder={}", j, cmap.encoder());
+
+                if Path::new(out_path).exists() {
+                    let _ = fs::remove_file(out_path);
+                }
+
+                println!("    -> Encoding image...");
+                encode_image_to_npng_image(
+                    "in.png",
+                    out_path,
+                    metadata.clone(),
+                    true,
+                    config.clone(),
+                    cmap.clone(),
+                )
+                .expect("encode_image_to_npng_image failed");
+
+                let md = fs::metadata(out_path).expect("cannot read out.npng");
+                println!("    <- Saved image, size={} bytes", md.len());
+                assert!(md.len() > 0, "out.npng is empty");
+
+                let _ = fs::remove_file(out_path);
+            }
+        }
+    }
+
+    #[test]
+    fn test_encode_bytes_and_decode_bytes_roundtrip_with_configs() {
+        require_in_png();
         let reader = ImageReader::open("in.png")
             .expect("cannot open in.png")
             .with_guessed_format()
             .expect("cannot guess format");
-        let img = reader.decode().expect("cannot decode in.png");
+        let _img = reader.decode().expect("cannot decode in.png");
 
         let metadata = Metadata::new_str("TEST", HashMap::new());
 
-        let bytes = encode_image_to_npng_bytes("in.png", metadata, Config::default())
-            .expect("encode_image_to_npng_bytes failed");
+        let compress_maps = vec![
+            CompressMap::plain(),
+            CompressMap::zlib(3),
+            CompressMap::zstd(1),
+        ];
 
-        assert!(!bytes.is_empty(), "Encoded bytes are empty");
+        for (i, config) in get_test_configs().iter().enumerate() {
+            println!(
+                "==> Config {}: save_alpha={}, varint={}",
+                i, config.save_alpha, config.varint
+            );
 
-        let out_decoded = "decoded.png";
-        if Path::new(out_decoded).exists() {
-            let _ = fs::remove_file(out_decoded);
+            for (j, cmap) in compress_maps.iter().enumerate() {
+                println!("  -- Using CompressMap #{}: encoder={}", j, cmap.encoder());
+
+                println!("    -> Encoding to bytes...");
+                let bytes = encode_image_to_npng_bytes(
+                    "in.png",
+                    metadata.clone(),
+                    config.clone(),
+                    cmap.clone(),
+                )
+                .expect("encode_image_to_npng_bytes failed");
+
+                assert!(!bytes.is_empty(), "Encoded bytes are empty");
+                println!("    <- Bytes encoded, length={}", bytes.len());
+
+                let out_decoded = "decoded.png";
+                if Path::new(out_decoded).exists() {
+                    let _ = fs::remove_file(out_decoded);
+                }
+
+                println!("    -> Decoding bytes to image...");
+                let (version, decoded_meta) =
+                    decode_bytes_to_image(&bytes, out_decoded, false, cmap.clone())
+                        .expect("decode_bytes_to_image failed");
+
+                let md = fs::metadata(out_decoded).expect("cannot read decoded.png");
+                println!("    <- Decoded image saved, size={} bytes", md.len());
+                assert!(md.len() > 0, "decoded.png is empty");
+
+                let _ = fs::remove_file(out_decoded);
+            }
         }
-
-        let (version, decoded_meta) = decode_bytes_to_image(&bytes, out_decoded, false)
-            .expect("decode_bytes_to_image failed");
-
-        let md = fs::metadata(out_decoded).expect("cannot read decoded.png");
-        assert!(md.len() > 0, "decoded.png is empty");
-
-        assert!(
-            version.version_major <= version.version_major,
-            "Invalid version"
-        );
-
-        let _ = fs::remove_file(out_decoded);
     }
 }

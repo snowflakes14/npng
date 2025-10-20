@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use bincode::{Decode, Encode};
 
 use crate::{
-    NPNGError,
+    Encoding, NPNGError,
+    compress::CompressMap,
     ver::{VERSION_MAJOR, VERSION_MINOR},
 };
 
@@ -29,6 +30,9 @@ impl Header {
         alpha: bool,
         varint: bool,
     ) -> Result<Self, NPNGError> {
+        if encoding_format.is_empty() {
+            return Err(NPNGError::Error("encoding format is empty".to_string()));
+        }
         if !encoding_format.is_ascii() {
             return Err(NPNGError::Error(
                 "encoding format must be ascii".to_string(),
@@ -151,4 +155,24 @@ pub struct Img {
 pub struct CheckSum {
     pub(crate) del: [u8; 16],
     pub(crate) crc32: u32,
+}
+
+pub trait IntoCompressMap: Send + Sync {
+    fn into_compress_map(self) -> Result<CompressMap, NPNGError>;
+}
+
+impl IntoCompressMap for Encoding {
+    fn into_compress_map(self) -> Result<CompressMap, NPNGError> {
+        Ok(match self {
+            Encoding::Plain => CompressMap::plain(),
+            Encoding::Zstd(l) => CompressMap::zstd(l as u32),
+            Encoding::Zlib(l) => CompressMap::zlib(l as u32),
+        })
+    }
+}
+
+impl IntoCompressMap for CompressMap {
+    fn into_compress_map(self) -> Result<CompressMap, NPNGError> {
+        Ok(self)
+    }
 }

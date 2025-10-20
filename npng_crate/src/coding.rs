@@ -42,92 +42,6 @@ pub(crate) fn spawn_plain_workers(
     Ok(buf)
 }
 
-pub(crate) fn spawn_zlib_workers(
-    pixels: Vec<Pixel>,
-    level: u32,
-    save_alpha: bool,
-    varint: bool,
-) -> Result<Vec<u8>, NPNGError> {
-    // Validate compression level (must be between 0 and 9)
-    if level > 9 {
-        return Err(NPNGError::Error("Invalid compression level".to_string()));
-    }
-
-    // 1. Encode pixels in parallel into local Vec<u8> with their indices
-    let mut results: Vec<(usize, Vec<u8>)> = pixels
-        .into_par_iter()
-        .enumerate()
-        .map(|(i, pixel)| {
-            let encoded = encode_pixel(pixel, save_alpha, varint)?;
-            Ok((i, encoded))
-        })
-        .collect::<Result<Vec<_>, NPNGError>>()?;
-
-    // 2. Sort the results to restore original pixel order
-    results.sort_by_key(|(i, _)| *i);
-
-    // 3. Combine all encoded pixels into a single uncompressed buffer
-    let mut uncompressed = Vec::new();
-    for (_, encoded_pixel) in results {
-        uncompressed.extend(encoded_pixel);
-    }
-
-    // 4. Compress the buffer using Zlib
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(level));
-    encoder
-        .write_all(&uncompressed)
-        .map_err(|e| NPNGError::Error(format!("Zlib write failed: {}", e)))?;
-    let compressed = encoder
-        .finish()
-        .map_err(|e| NPNGError::Error(format!("Zlib finish failed: {}", e)))?;
-
-    Ok(compressed)
-}
-
-pub(crate) fn spawn_zstd_workers(
-    pixels: Vec<Pixel>,
-    level: u32,
-    save_alpha: bool,
-    varint: bool,
-) -> Result<Vec<u8>, NPNGError> {
-    // Validate compression level (Zstd supports levels 0–22)
-    if level > 22 {
-        return Err(NPNGError::Error(
-            "Unsupported compression level".to_string(),
-        ));
-    }
-
-    // 1. Encode pixels in parallel into local Vec<u8> with their indices
-    let mut results: Vec<(usize, Vec<u8>)> = pixels
-        .into_par_iter()
-        .enumerate()
-        .map(|(i, pixel)| {
-            let encoded = encode_pixel(pixel, save_alpha, varint)?;
-            Ok((i, encoded))
-        })
-        .collect::<Result<Vec<_>, NPNGError>>()?;
-
-    // 2. Sort the results to restore the original pixel order
-    results.sort_by_key(|(i, _)| *i);
-
-    // 3. Combine all encoded pixels into a single uncompressed buffer
-    let mut uncompressed = Vec::new();
-    for (_, encoded_pixel) in results {
-        uncompressed.extend(encoded_pixel);
-    }
-
-    // 4. Compress the buffer using Zstd
-    let mut encoder = zstd::Encoder::new(Vec::new(), level as i32)?;
-    encoder
-        .write_all(&uncompressed)
-        .map_err(|e| NPNGError::Error(format!("Zstd write failed: {}", e)))?;
-    let compressed = encoder
-        .finish()
-        .map_err(|e| NPNGError::Error(format!("Zstd finish failed: {}", e)))?;
-
-    Ok(compressed)
-}
-
 pub(crate) fn spawn_plain_decode_workers(
     encoded_bytes: Vec<u8>,
     save_alpha: bool,
@@ -195,30 +109,56 @@ pub(crate) fn spawn_plain_decode_workers(
     Ok(result)
 }
 
-pub(crate) fn spawn_zlib_decode_workers(
-    compressed: &[u8],
-    save_alpha: bool,
-    varint: bool,
-) -> Result<Vec<Pixel>, NPNGError> {
+pub(crate) fn spawn_zlib_compress(uncompressed: &[u8], level: u32) -> Result<Vec<u8>, NPNGError> {
+    if level > 9 {
+        return Err(NPNGError::Error("Invalid compression level".to_string()));
+    }
+
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(level));
+    encoder
+        .write_all(uncompressed)
+        .map_err(|e| NPNGError::Error(format!("Zlib write failed: {}", e)))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|e| NPNGError::Error(format!("Zlib finish failed: {}", e)))?;
+
+    Ok(compressed)
+}
+
+pub(crate) fn spawn_zlib_decompress(compressed: &[u8]) -> Result<Vec<u8>, NPNGError> {
     let mut decoder = ZlibDecoder::new(Cursor::new(compressed));
-    let mut decompressed: Vec<u8> = Vec::new();
+    let mut decompressed = Vec::new();
     decoder
         .read_to_end(&mut decompressed)
         .map_err(|e| NPNGError::Error(format!("Zlib decode failed: {}", e)))?;
 
-    spawn_plain_decode_workers(decompressed, save_alpha, varint)
+    Ok(decompressed)
 }
 
-pub(crate) fn spawn_zstd_decode_workers(
-    compressed: &[u8],
-    save_alpha: bool,
-    varint: bool,
-) -> Result<Vec<Pixel>, NPNGError> {
+pub(crate) fn spawn_zstd_compress(uncompressed: &[u8], level: u32) -> Result<Vec<u8>, NPNGError> {
+    if level > 22 {
+        return Err(NPNGError::Error(
+            "Unsupported compression level".to_string(),
+        ));
+    }
+
+    let mut encoder = zstd::Encoder::new(Vec::new(), level as i32)?;
+    encoder
+        .write_all(uncompressed)
+        .map_err(|e| NPNGError::Error(format!("Zstd write failed: {}", e)))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|e| NPNGError::Error(format!("Zstd finish failed: {}", e)))?;
+
+    Ok(compressed)
+}
+
+pub(crate) fn spawn_zstd_decompress(compressed: &[u8]) -> Result<Vec<u8>, NPNGError> {
     let mut decoder = zstd::Decoder::new(Cursor::new(compressed))?;
-    let mut decompressed: Vec<u8> = Vec::new();
+    let mut decompressed = Vec::new();
     decoder
         .read_to_end(&mut decompressed)
         .map_err(|e| NPNGError::Error(format!("Zstd decode failed: {}", e)))?;
 
-    spawn_plain_decode_workers(decompressed, save_alpha, varint)
+    Ok(decompressed)
 }

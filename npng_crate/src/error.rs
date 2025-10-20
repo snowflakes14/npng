@@ -3,17 +3,33 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum NPNGError {
-    #[error("encoding error {0}")]
+    #[error("Encoding failed: {0}")]
     EncodingError(#[from] EncodeError),
-    #[error("decoding error {0}")]
+
+    #[error("Decoding failed: {0}")]
     DecodingError(#[from] DecodeError),
-    #[error("error: {0}")]
+
+    #[error("{0}")]
     Error(String),
-    #[error("{0}")]
+
+    #[error("Invalid header: {0}")]
     InvalidHeader(String),
-    #[error("{0}")]
+
+    #[error("Invalid checksum: {0}")]
     InvalidChecksum(String),
 
-    #[error("IO error: {0}")]
+    #[error("Compression error: {0}")]
+    Compression(#[from] NPNGCompressingError),
+
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum NPNGCompressingError {
+    #[error("Compression failed: {0}")]
+    CompressingError(String),
+
+    #[error("Decompression failed: {0}")]
+    DecompressingError(String),
 }

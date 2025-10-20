@@ -1,6 +1,6 @@
 [package]
 name = "npng_crate"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 
 authors = ["snowflakes14 <snowflakes1445@gmail.com>"]
@@ -11,7 +11,7 @@ categories = ["asynchronous", "encoding"]
 
 [dependencies]
 bincode = "2.0.1"
-__tk_rt_private = {package = "tokio", version = "1.47.1", features = ["rt"], optional = true} # tokio is renamed
+__tk_rt_private = {package = "tokio", version = "1.47.1", features = ["rt", "macros"], optional = true} # tokio is renamed
 image = "0.25.8"
 flate2 = "1.1.2"
 thiserror =  "2.0.17"
@@ -19,6 +19,8 @@ rayon = "1.11.0"
 crc32fast = "1.5.0"
 zstd = "0.13.3"
 log = "0.4.28"
+
+
 
 [lib]
 doctest = false
