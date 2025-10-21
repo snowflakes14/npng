@@ -21,7 +21,7 @@ Npng is a binary image format with support for transparency and arbitrary shapes
     - Each pixel has (x, y) coordinates, allowing storage of images with arbitrary shapes.
 
 3. **Compression**
-    - Supported formats: Plain, Zlib, Zstd.
+    - Officially supported formats: Plain (no compression), Zlib, Zstd.
 
 4. **Integrity**
     - Data verification via CRC32.
