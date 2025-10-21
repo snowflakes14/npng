@@ -1,3 +1,6 @@
+#[cfg(target_pointer_width = "32")]
+compile_error!("32-bit system is not supported. Sorry"); // I don't want to support 32-bit platforms, sorry
+
 #[allow(dead_code)]
 #[allow(unused)]
 use std::{
@@ -31,6 +34,9 @@ pub mod compress;
 pub mod types;
 mod utils;
 mod ver;
+
+const MAX_PIXELS: usize = 65536 * 65536; // 4_294_967_296
+const SIZE: usize = u16::MAX as usize;
 
 #[derive(Debug, Clone)]
 pub enum Encoding {
@@ -112,6 +118,13 @@ pub fn encode_pixel_vec_with_metadata(
     config: Config,
     compress_map: impl IntoCompressMap,
 ) -> Result<Vec<u8>, NPNGError> {
+    if pixels.len() > MAX_PIXELS {
+        return Err(NPNGError::Error(format!(
+            "Too many pixels ({}), maximum supported is {}",
+            pixels.len(),
+            MAX_PIXELS
+        )));
+    }
     let compress_map = compress_map.into_compress_map()?;
     let save_alpha = config.save_alpha;
     let varint = config.varint;
@@ -124,14 +137,19 @@ pub fn encode_pixel_vec_with_metadata(
 
     /* ===== Check for duplicate coordinates === */
     {
-        let mut seen = HashSet::new();
+        let mut bitmap = vec![0u8; (MAX_PIXELS) / 8]; // 512 MB
+
         for p in &pixels {
-            if !seen.insert((p.x, p.y)) {
-                return Err(NPNGError::Error(format!(
-                    "Duplicate pixel coordinates found: ({}, {})",
-                    p.x, p.y
-                )));
+            let idx = (p.y as usize) * SIZE + (p.x as usize);
+            let byte = idx / 8;
+            let bit = idx % 8;
+            let mask = 1 << bit;
+
+            if bitmap[byte] & mask != 0 {
+                return Err(NPNGError::DuplicatePixel(p.x, p.y))
             }
+
+            bitmap[byte] |= mask;
         }
     }
 
@@ -530,6 +548,27 @@ pub fn decode_bytes_to_pixel_vec(
             let format = header_decoded.encoding_format.clone();
             let uncompressed = compress_map.decompress(body, format.as_str())?;
             let decoded = spawn_plain_decode_workers(uncompressed, save_alpha, varint)?;
+            if decoded.len() > MAX_PIXELS {
+                return Err(NPNGError::Error("Pixel vec is too long".to_string()));
+            }
+            /* ===== Check for duplicate coordinates === */
+            {
+                let mut bitmap = vec![0u8; (MAX_PIXELS) / 8]; // 512 MB
+
+                for p in &decoded {
+                    let idx = (p.y as usize) * SIZE + (p.x as usize);
+                    let byte = idx / 8;
+                    let bit = idx % 8;
+                    let mask = 1 << bit;
+
+                    if bitmap[byte] & mask != 0 {
+                        return Err(NPNGError::DuplicatePixel(p.x, p.y))
+                    }
+
+                    bitmap[byte] |= mask;
+                }
+            }
+
             if check_image_size {
                 let real_size = check_image_size_f(decoded);
                 result.data.width = real_size.0;

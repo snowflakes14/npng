@@ -21,6 +21,9 @@ pub enum NPNGError {
     #[error("Compression error: {0}")]
     Compression(#[from] NPNGCompressingError),
 
+    #[error("Found pixel duplicate on x:{0} y:{1}")]
+    DuplicatePixel(u16, u16), // Position
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
