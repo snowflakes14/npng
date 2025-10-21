@@ -36,7 +36,7 @@ mod utils;
 mod ver;
 
 const MAX_PIXELS: usize = 65536 * 65536; // 4_294_967_296
-const SIZE: usize = 65536
+const SIZE: usize = 65536;
 
 #[derive(Debug, Clone)]
 pub enum Encoding {
