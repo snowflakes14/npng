@@ -136,3 +136,15 @@ fn test_encode_bytes_and_decode_bytes_roundtrip_with_configs() {
         }
     }
 }
+
+#[test]
+fn test_coordinates_duplicates() {
+    let pixels = vec![
+        Pixel::new(1, 1, 0),
+        Pixel::new(1, 1, 0),
+    ];
+
+    let r = encode_pixel_vec_with_metadata(pixels, Metadata::new_str("TEST", HashMap::new()), Config::default(), Encoding::Plain);
+    assert!(matches!(r, Err(NPNGError::DuplicatePixel(_, _))));
+    println!("test_coordinates_duplicates: {:?}", r.err().unwrap().to_string());
+}
