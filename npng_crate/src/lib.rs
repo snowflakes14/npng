@@ -572,10 +572,13 @@ pub fn decode_bytes_to_pixel_vec(
             }
 
             if check_image_size {
-                let real_size = check_image_size_f(decoded);
+                let real_size = check_image_size_f(decoded.clone());
                 result.data.width = real_size.0;
                 result.data.height = real_size.1;
             }
+
+            result.pixels = decoded;
+
             Ok(result)
         }
         None => Err(NPNGError::Error("Invalid header".to_string())),
