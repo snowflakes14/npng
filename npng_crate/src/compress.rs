@@ -81,7 +81,7 @@ impl CompressMap {
             .get(decompressor)
             .copied()
             .unwrap_or(Self::__plain_decompress);
-        Ok(func(data, Some(self.level))?)
+        Ok(func(data, if self.level > 0 { Some(self.level) } else { None })?)
     }
 
     // ===== Built-in functions =====
@@ -121,6 +121,36 @@ impl CompressMap {
         spawn_zlib_decompress(data)
             .map_err(|e| NPNGCompressingError::DecompressingError(e.to_string()))
     }
+
+    fn __xor_encoder(data: &[u8], key: u32) -> Result<Vec<u8>, NPNGCompressingError> {
+        let key_bytes = key.to_le_bytes();
+        let key_len = key_bytes.len();
+
+        let mut result = data.to_vec();
+
+        for (i, b) in result.iter_mut().enumerate() {
+            *b ^= key_bytes[i % key_len];
+        }
+
+        Ok(result)
+    }
+
+    fn __xor_decoder(data: &[u8], key: Option<u32>) -> Result<Vec<u8>, NPNGCompressingError> {
+        match key {
+            Some(k) => {
+                let key_bytes = k.to_le_bytes();
+                let key_len = key_bytes.len();
+                let mut result = data.to_vec();
+                for (i, b) in result.iter_mut().enumerate() {
+                    *b ^= key_bytes[i % key_len];
+                }
+                Ok(result)
+            }
+            None => Err(NPNGCompressingError::DecompressingError("Empty key".to_string())),
+        }
+    }
+
+
 
     // ===== Constructors =====
     pub fn zstd(level: u32) -> Self {
@@ -181,6 +211,29 @@ impl CompressMap {
             level: 0,
         };
         let _ = s.add_decompressor("plain".to_string(), Self::__plain_decompress);
+        s
+    }
+
+    pub fn set_xor_encoding(&mut self, key: u32) {
+        self.set_level(key);
+        self.set_compressor("xor".to_string(), Self::__xor_encoder).unwrap()
+    }
+
+    pub fn add_xor_decoding(&mut self, key: u32) {
+        self.set_level(key);
+        self.add_decompressor("xor".to_string(), Self::__xor_decoder).unwrap()
+    }
+
+    pub fn xor(key: u32) -> Self {
+        let mut d = HashMap::new();
+        d.insert("xor".to_string(), Self::__xor_decoder);
+
+        let mut s = Self {
+            level: key,
+            decompressors: HashMap::new(),
+            compressor: ("xor".to_string(), Self::__xor_encoder),
+        };
+        s.add_decompressor("xor".to_string(), Self::__xor_decoder).unwrap();
         s
     }
 
