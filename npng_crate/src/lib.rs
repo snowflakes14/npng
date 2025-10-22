@@ -1,6 +1,8 @@
 #[cfg(target_pointer_width = "32")]
 compile_error!("32-bit system is not supported. Sorry"); // I don't want to support 32-bit platforms, sorry
 
+extern crate std;
+
 #[allow(dead_code)]
 #[allow(unused)]
 use std::{
