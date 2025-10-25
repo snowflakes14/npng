@@ -96,12 +96,12 @@ impl CompressMap {
         Ok(data.to_vec())
     }
 
-    fn __zstd_compress_boxed(data: &[u8], level: u32) -> Result<Vec<u8>, NPNGCompressingError> {
+    fn __zstd_compress(data: &[u8], level: u32) -> Result<Vec<u8>, NPNGCompressingError> {
         spawn_zstd_compress(data, level)
             .map_err(|e| NPNGCompressingError::CompressingError(e.to_string()))
     }
 
-    fn __zstd_decompress_boxed(
+    fn __zstd_decompress(
         data: &[u8],
         _level: Option<u32>,
     ) -> Result<Vec<u8>, NPNGCompressingError> {
@@ -109,12 +109,12 @@ impl CompressMap {
             .map_err(|e| NPNGCompressingError::DecompressingError(e.to_string()))
     }
 
-    fn __zlib_compress_boxed(data: &[u8], level: u32) -> Result<Vec<u8>, NPNGCompressingError> {
+    fn __zlib_compress(data: &[u8], level: u32) -> Result<Vec<u8>, NPNGCompressingError> {
         spawn_zlib_compress(data, level)
             .map_err(|e| NPNGCompressingError::CompressingError(e.to_string()))
     }
 
-    fn __zlib_decompress_boxed(
+    fn __zlib_decompress(
         data: &[u8],
         _level: Option<u32>,
     ) -> Result<Vec<u8>, NPNGCompressingError> {
@@ -159,9 +159,9 @@ impl CompressMap {
             compressor: ("plain".to_string(), Self::__plain_compress),
             level: 0,
         };
-        s.add_decompressor("zstd".to_string(), Self::__zstd_decompress_boxed)
+        s.add_decompressor("zstd".to_string(), Self::__zstd_decompress)
             .unwrap();
-        s.set_compressor("zstd".to_string(), Self::__zstd_compress_boxed)
+        s.set_compressor("zstd".to_string(), Self::__zstd_compress)
             .unwrap();
         s.level = level;
         s
@@ -173,30 +173,30 @@ impl CompressMap {
             compressor: ("plain".to_string(), Self::__plain_compress),
             level: 0,
         };
-        s.add_decompressor("zlib".to_string(), Self::__zlib_decompress_boxed)
+        s.add_decompressor("zlib".to_string(), Self::__zlib_decompress)
             .unwrap();
-        s.set_compressor("zlib".to_string(), Self::__zlib_compress_boxed)
+        s.set_compressor("zlib".to_string(), Self::__zlib_compress)
             .unwrap();
         s.level = level;
         s
     }
 
     pub fn add_zlib_decompress(&mut self) {
-        let _ = self.add_decompressor("zlib".to_string(), Self::__zlib_decompress_boxed);
+        let _ = self.add_decompressor("zlib".to_string(), Self::__zlib_decompress);
     }
 
     pub fn add_zstd_decompress(&mut self) {
-        let _ = self.add_decompressor("zstd".to_string(), Self::__zstd_decompress_boxed);
+        let _ = self.add_decompressor("zstd".to_string(), Self::__zstd_decompress);
     }
 
     pub fn set_zlib_compress(&mut self, level: u32) {
         self.set_level(level);
-        let _ = self.set_compressor("zlib".to_string(), Self::__zlib_compress_boxed);
+        let _ = self.set_compressor("zlib".to_string(), Self::__zlib_compress);
     }
 
     pub fn set_zstd_compress(&mut self, level: u32) {
         self.set_level(level);
-        let _ = self.set_compressor("zstd".to_string(), Self::__zstd_compress_boxed);
+        let _ = self.set_compressor("zstd".to_string(), Self::__zstd_compress);
     }
 
     pub fn set_plain_compress(&mut self) {
