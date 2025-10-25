@@ -96,6 +96,12 @@ pub struct CheckSum {
 ```
 
 ------------------------------------------------------------
+## Adding to your project
+add this to dependencies: 
+`npng_crate = {git = "https://github.com/snowflakes14/npng.git", subdir = "npng_crate"}`
+
+
+------------------------------------------------------------
 
 This is an educational project — please don’t judge too harshly.
 
