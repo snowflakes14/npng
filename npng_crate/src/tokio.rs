@@ -1,24 +1,17 @@
 extern crate __tk_rt_private as tokio; // use renamed tokio as tokio
 
 use std::ffi::OsStr;
-use tokio::task;
 
 use image::Rgba;
+use tokio::task;
 
 use crate::{
-    Config,
-    Encoding,
-    NPNGError,
-    encode_pixel_vec_with_metadata,
-    encode_image_to_npng_bytes,
-    encode_image_to_npng_pixels,
-    encode_pixel_vec_to_npng_image,
-    encode_image_to_npng_image,
-    decode_bytes_to_pixel_vec,
-    decode_bytes_to_image,
-    decode_npng_image_to_image,
-    types::{IntoCompressMap, EncoderVersion, Img, Metadata, Pixel},
+    Config, Encoding, NPNGError,
     compress::CompressMap,
+    decode_bytes_to_image, decode_bytes_to_pixel_vec, decode_npng_image_to_image,
+    encode_image_to_npng_bytes, encode_image_to_npng_image, encode_image_to_npng_pixels,
+    encode_pixel_vec_to_npng_image, encode_pixel_vec_with_metadata,
+    types::{EncoderVersion, Img, IntoCompressMap, Metadata, Pixel},
 };
 
 /// Encode pixels -> NPNG bytes (blocking) on a tokio thread.
@@ -28,7 +21,9 @@ pub fn encode_pixel_vec_tokio(
     config: Config,
     compress_map: impl IntoCompressMap + 'static,
 ) -> task::JoinHandle<Result<Vec<u8>, NPNGError>> {
-    task::spawn_blocking(move || encode_pixel_vec_with_metadata(pixels, metadata, config, compress_map))
+    task::spawn_blocking(move || {
+        encode_pixel_vec_with_metadata(pixels, metadata, config, compress_map)
+    })
 }
 
 /// Encode image file -> NPNG bytes (blocking) on a tokio thread.
@@ -87,7 +82,9 @@ pub fn decode_bytes_to_pixel_vec_tokio(
     ignore_checksum: bool,
     compress_map: impl IntoCompressMap + 'static,
 ) -> task::JoinHandle<Result<Img, NPNGError>> {
-    task::spawn_blocking(move || decode_bytes_to_pixel_vec(&bytes, check_image_size, ignore_checksum, compress_map))
+    task::spawn_blocking(move || {
+        decode_bytes_to_pixel_vec(&bytes, check_image_size, ignore_checksum, compress_map)
+    })
 }
 
 /// Decode NPNG bytes -> image file (blocking) on a tokio thread.
@@ -97,7 +94,9 @@ pub fn decode_bytes_to_image_tokio<O: AsRef<OsStr> + Send + 'static>(
     ignore_checksum: bool,
     compress_map: impl IntoCompressMap + 'static,
 ) -> task::JoinHandle<Result<(EncoderVersion, Metadata), NPNGError>> {
-    task::spawn_blocking(move || decode_bytes_to_image(&bytes, output, ignore_checksum, compress_map))
+    task::spawn_blocking(move || {
+        decode_bytes_to_image(&bytes, output, ignore_checksum, compress_map)
+    })
 }
 
 /// Decode .npng file -> image file (blocking) on a tokio thread.
@@ -110,5 +109,7 @@ pub fn decode_npng_image_to_image_tokio<
     ignore_checksum: bool,
     compress_map: impl IntoCompressMap + 'static,
 ) -> task::JoinHandle<Result<(EncoderVersion, Metadata), NPNGError>> {
-    task::spawn_blocking(move || decode_npng_image_to_image(input, output, ignore_checksum, compress_map))
+    task::spawn_blocking(move || {
+        decode_npng_image_to_image(input, output, ignore_checksum, compress_map)
+    })
 }
