@@ -138,21 +138,14 @@ pub fn encode_pixel_vec_with_metadata(
     metadata.height = s.1;
 
     /* ===== Check for duplicate coordinates === */
-    {
-        let mut bitmap = vec![0u8; (MAX_PIXELS) / 8]; // 512 MB
+    let mut bitmap = bitvec![0; MAX_PIXELS];
 
-        for p in &pixels {
-            let idx = (p.y as usize) * SIZE + (p.x as usize);
-            let byte = idx / 8;
-            let bit = idx % 8;
-            let mask = 1 << bit;
-
-            if bitmap[byte] & mask != 0 {
-                return Err(NPNGError::DuplicatePixel(p.x, p.y))
-            }
-
-            bitmap[byte] |= mask;
+    for p in &pixels {
+        let idx = (p.y as usize) * SIZE + (p.x as usize);
+        if bitmap[idx] {
+            return Err(NPNGError::DuplicatePixel(p.x, p.y));
         }
+        bitmap.set(idx, true);
     }
 
     /* ===== Prepare buffer for entire image ===== */
@@ -554,21 +547,14 @@ pub fn decode_bytes_to_pixel_vec(
                 return Err(NPNGError::Error("Pixel vec is too long".to_string()));
             }
             /* ===== Check for duplicate coordinates === */
-            {
-                let mut bitmap = vec![0u8; (MAX_PIXELS) / 8]; // 512 MB
+            let mut bitmap = bitvec![0; MAX_PIXELS];
 
-                for p in &decoded {
-                    let idx = (p.y as usize) * SIZE + (p.x as usize);
-                    let byte = idx / 8;
-                    let bit = idx % 8;
-                    let mask = 1 << bit;
-
-                    if bitmap[byte] & mask != 0 {
-                        return Err(NPNGError::DuplicatePixel(p.x, p.y))
-                    }
-
-                    bitmap[byte] |= mask;
+            for p in &decoded {
+                let idx = (p.y as usize) * SIZE + (p.x as usize);
+                if bitmap[idx] {
+                    return Err(NPNGError::DuplicatePixel(p.x, p.y));
                 }
+                bitmap.set(idx, true);
             }
 
             if check_image_size {
