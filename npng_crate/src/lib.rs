@@ -14,6 +14,8 @@ use std::{
     path::Path,
 };
 
+use bitvec::bitvec;
+use bytes::Bytes;
 use crc32fast::Hasher;
 use image::{GenericImageView, ImageBuffer, ImageReader, Pixel as TraitPx, Rgba};
 use log::warn;
@@ -37,7 +39,7 @@ pub mod types;
 mod utils;
 mod ver;
 
-const MAX_PIXELS: usize = 65536 * 65536; // 4_294_967_296
+const MAX_PIXELS: usize = SIZE * SIZE; // 4_294_967_296
 const SIZE: usize = 65536;
 
 #[derive(Debug, Clone)]
@@ -162,7 +164,7 @@ pub fn encode_pixel_vec_with_metadata(
 
     // ===== Encode pixels =====
     let pixels_encoded = spawn_plain_workers(pixels, config.save_alpha, config.varint)?;
-    let pixels_encoded = compress_map.compress(pixels_encoded.as_slice())?;
+    let pixels_encoded = compress_map.compress(pixels_encoded.into())?;
 
     /* ===== Calculate and encode CRC32 ===== */
     buf.extend(pixels_encoded.1);
@@ -541,7 +543,8 @@ pub fn decode_bytes_to_pixel_vec(
             };
 
             let format = header_decoded.encoding_format.clone();
-            let uncompressed = compress_map.decompress(body, format.as_str())?;
+            let uncompressed =
+                compress_map.decompress(Bytes::copy_from_slice(body), format.as_str())?;
             let decoded = spawn_plain_decode_workers(uncompressed, save_alpha, varint)?;
             if decoded.len() > MAX_PIXELS {
                 return Err(NPNGError::Error("Pixel vec is too long".to_string()));
