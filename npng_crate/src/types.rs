@@ -5,6 +5,7 @@ use bincode::{Decode, Encode};
 use crate::{
     Encoding, NPNGError,
     compress::CompressMap,
+    utils::set_byte,
     ver::{VERSION_MAJOR, VERSION_MINOR},
 };
 
@@ -109,6 +110,20 @@ pub struct Pixel {
     pub x: u16,
     pub y: u16,
     pub color: u32,
+}
+
+impl From<RGBPixel> for Pixel {
+    fn from(rgb: RGBPixel) -> Self {
+        let col: u32 = set_byte(0, 0, rgb.color[0]);
+        let col: u32 = set_byte(col, 1, rgb.color[1]);
+        let col: u32 = set_byte(col, 2, rgb.color[2]);
+        let col: u32 = set_byte(col, 3, 0xFF);
+        Self {
+            x: rgb.x,
+            y: rgb.y,
+            color: col,
+        }
+    }
 }
 
 #[repr(C)]
