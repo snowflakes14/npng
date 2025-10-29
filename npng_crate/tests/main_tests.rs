@@ -4,9 +4,7 @@ use image::ImageReader;
 
 extern crate npng_crate;
 
-use npng_crate::*;
-use npng_crate::compress::CompressMap;
-use npng_crate::types::*;
+use npng_crate::{compress::CompressMap, types::*, *};
 
 fn require_in_png() {
     let p = Path::new("in.png");
@@ -69,7 +67,7 @@ fn test_encode_image_to_npng_image_with_configs() {
                 config.clone(),
                 cmap.clone(),
             )
-                .expect("encode_image_to_npng_image failed");
+            .expect("encode_image_to_npng_image failed");
 
             let md = fs::metadata(out_path).expect("cannot read out.npng");
             println!("    <- Saved image, size={} bytes", md.len());
@@ -113,7 +111,7 @@ fn test_encode_bytes_and_decode_bytes_roundtrip_with_configs() {
                 config.clone(),
                 cmap.clone(),
             )
-                .expect("encode_image_to_npng_bytes failed");
+            .expect("encode_image_to_npng_bytes failed");
 
             assert!(!bytes.is_empty(), "Encoded bytes are empty");
             println!("    <- Bytes encoded, length={}", bytes.len());
@@ -139,12 +137,17 @@ fn test_encode_bytes_and_decode_bytes_roundtrip_with_configs() {
 
 #[test]
 fn test_coordinates_duplicates() {
-    let pixels = vec![
-        Pixel::new(1, 1, 0),
-        Pixel::new(1, 1, 0),
-    ];
+    let pixels = vec![Pixel::new(1, 1, 0), Pixel::new(1, 1, 0)];
 
-    let r = encode_pixel_vec_with_metadata(pixels, Metadata::new_str("TEST", HashMap::new()), Config::default(), Encoding::Plain);
+    let r = encode_pixel_vec_with_metadata(
+        pixels,
+        Metadata::new_str("TEST", HashMap::new()),
+        Config::default(),
+        Encoding::Plain,
+    );
     assert!(matches!(r, Err(NPNGError::DuplicatePixel(_, _))));
-    println!("test_coordinates_duplicates: {:?}", r.err().unwrap().to_string());
+    println!(
+        "test_coordinates_duplicates: {:?}",
+        r.err().unwrap().to_string()
+    );
 }

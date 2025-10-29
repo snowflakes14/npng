@@ -1,11 +1,9 @@
-extern crate npng_crate;
 extern crate __tk_rt_private as tokio;
-use npng_crate::*;
-use npng_crate::tokio::*;
+extern crate npng_crate;
 use std::{collections::HashMap, fs, path::Path};
+
 use image::ImageReader;
-use npng_crate::compress::CompressMap;
-use npng_crate::types::Metadata;
+use npng_crate::{compress::CompressMap, tokio::*, types::Metadata, *};
 
 fn require_in_png() {
     let p = Path::new("in.png");
@@ -14,10 +12,22 @@ fn require_in_png() {
 
 fn get_test_configs() -> Vec<Config> {
     vec![
-        Config { save_alpha: true, varint: true },
-        Config { save_alpha: true, varint: false },
-        Config { save_alpha: false, varint: true },
-        Config { save_alpha: false, varint: false },
+        Config {
+            save_alpha: true,
+            varint: true,
+        },
+        Config {
+            save_alpha: true,
+            varint: false,
+        },
+        Config {
+            save_alpha: false,
+            varint: true,
+        },
+        Config {
+            save_alpha: false,
+            varint: false,
+        },
     ]
 }
 
@@ -47,9 +57,9 @@ async fn test_encode_image_to_npng_image_with_configs_tokio() {
                 config.clone(),
                 cmap.clone(),
             )
-                .await
-                .expect("encoding failed")
-                .expect("encoding failed");
+            .await
+            .expect("encoding failed")
+            .expect("encoding failed");
 
             let md = fs::metadata(out_path).expect("cannot read out.npng");
             assert!(md.len() > 0, "out.npng is empty");
@@ -78,9 +88,9 @@ async fn test_encode_bytes_and_decode_bytes_roundtrip_with_configs_tokio() {
                 config.clone(),
                 cmap.clone(),
             )
-                .await
-                .expect("encoding failed")
-                .expect("encoding failed");
+            .await
+            .expect("encoding failed")
+            .expect("encoding failed");
 
             assert!(!bytes.is_empty(), "encoded bytes empty");
 
