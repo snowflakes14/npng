@@ -96,49 +96,6 @@ pub(crate) fn encode_pixel(
     Ok(s)
 }
 
-/// Decodes a pixel from a byte slice.
-///
-/// This function can decode either a full `Pixel` with alpha channel
-/// or an `RGBPixel` without alpha, depending on the `save_alpha` flag.
-///
-/// # Parameters
-/// - `data`: The byte slice containing the serialized pixel data.
-/// - `save_alpha`: If `true`, decode as a full `Pixel` (including alpha).
-///                 If `false`, decode as `RGBPixel` and set alpha to 0xFF.
-///
-/// # Returns
-/// - `Ok(Pixel)`: The decoded pixel with proper color and alpha channel.
-/// - `Err(NPNGError)`: If deserialization fails.
-///
-/// # Example
-/// ```rust
-/// let pixel = decode_pixel(&data, true)?;
-/// ```
-pub(crate) fn decode_pixel(
-    data: &[u8],
-    save_alpha: bool,
-    varint: bool,
-) -> Result<Pixel, NPNGError> {
-    if save_alpha {
-        // Decode a full Pixel with alpha channel preserved
-        let pixel: Pixel = deserialize(data.to_vec(), varint)?;
-        Ok(pixel)
-    } else {
-        // Decode as RGBPixel (without alpha) and construct a full Pixel
-        // by setting alpha to 0xFF (fully opaque)
-        let rgb_pixel: RGBPixel = deserialize(data.to_vec(), varint)?;
-        let pixel = Pixel {
-            x: rgb_pixel.x,
-            y: rgb_pixel.y,
-            color: ((rgb_pixel.color[0] as u32) << 24)  // Red
-                | ((rgb_pixel.color[1] as u32) << 16)   // Green
-                | ((rgb_pixel.color[2] as u32) << 8)    // Blue
-                | 0xFF, // Alpha (fully opaque)
-        };
-        Ok(pixel)
-    }
-}
-
 /// Get npng image size
 /// # Returns
 /// tuple with `(width, height)`
@@ -146,4 +103,18 @@ pub(crate) fn check_image_size_f(pixels: Vec<Pixel>) -> (u16, u16) {
     let width = pixels.iter().map(|p| p.x).max().unwrap_or(0) + 1;
     let height = pixels.iter().map(|p| p.y).max().unwrap_or(0) + 1;
     (width, height)
+}
+
+pub(crate) fn set_byte<T>(mut a: T, n: u8, value: u8) -> T
+where
+    T: Copy
+        + std::ops::BitOr<Output = T>
+        + std::ops::BitAnd<Output = T>
+        + std::ops::Not<Output = T>
+        + std::ops::Shl<u8, Output = T>
+        + From<u8>,
+{
+    a = a & !(T::from(0xFF) << (n * 8));
+    a = a | (T::from(value) << (n * 8));
+    a
 }
