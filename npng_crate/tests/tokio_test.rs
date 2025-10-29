@@ -48,6 +48,7 @@ async fn test_encode_image_to_npng_image_with_configs_tokio() {
                 cmap.clone(),
             )
                 .await
+                .expect("encoding failed")
                 .expect("encoding failed");
 
             let md = fs::metadata(out_path).expect("cannot read out.npng");
@@ -91,6 +92,7 @@ async fn test_encode_bytes_and_decode_bytes_roundtrip_with_configs_tokio() {
             // decode back to image
             decode_bytes_to_image_tokio(bytes, out_decoded, false, cmap.clone())
                 .await
+                .expect("decoding failed")
                 .expect("decoding failed");
 
             let md = fs::metadata(out_decoded).expect("cannot read decoded.png");
