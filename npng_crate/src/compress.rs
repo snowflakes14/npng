@@ -1,19 +1,21 @@
-use std::collections::HashMap;
-
-use crate::{
-    NPNGError,
-    coding::{
-        spawn_zlib_compress, spawn_zlib_decompress, spawn_zstd_compress, spawn_zstd_decompress,
-    },
-    error::NPNGCompressingError,
+use std::{
+    collections::HashMap,
+    io::{Cursor, Read, Write},
 };
+
+use bytes::{Bytes, BytesMut};
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
+use zstd::zstd_safe::WriteBuf;
+
+use crate::{NPNGError, error::NPNGCompressingError};
 
 #[derive(Clone, Debug)]
 pub struct CompressMap {
-    decompressors: HashMap<String, fn(&[u8], Option<u32>) -> Result<Vec<u8>, NPNGCompressingError>>,
+    decompressors:
+        HashMap<String, fn(Bytes, Option<u32>) -> Result<BytesMut, NPNGCompressingError>>,
     compressor: (
         String,
-        fn(&[u8], u32) -> Result<Vec<u8>, NPNGCompressingError>,
+        fn(Bytes, u32) -> Result<BytesMut, NPNGCompressingError>,
     ),
     level: u32, // compression level
 }
@@ -44,7 +46,7 @@ impl CompressMap {
     pub fn set_compressor(
         &mut self,
         name: String,
-        compressor: fn(&[u8], u32) -> Result<Vec<u8>, NPNGCompressingError>,
+        compressor: fn(Bytes, u32) -> Result<BytesMut, NPNGCompressingError>,
     ) -> Result<(), NPNGError> {
         if name.is_empty() || !name.is_ascii() || name.len() > 255 {
             return Err(NPNGError::Error(
@@ -58,7 +60,7 @@ impl CompressMap {
     pub fn add_decompressor(
         &mut self,
         name: String,
-        decompressor: fn(&[u8], Option<u32>) -> Result<Vec<u8>, NPNGCompressingError>,
+        decompressor: fn(Bytes, Option<u32>) -> Result<BytesMut, NPNGCompressingError>,
     ) -> Result<(), NPNGError> {
         if name.is_empty() || !name.is_ascii() || name.len() > 255 {
             return Err(NPNGError::Error(
@@ -69,64 +71,75 @@ impl CompressMap {
         Ok(())
     }
 
-    pub(crate) fn compress(&self, data: &[u8]) -> Result<(String, Vec<u8>), NPNGError> {
+    pub(crate) fn compress(&self, data: Bytes) -> Result<(String, BytesMut), NPNGError> {
         let (name, func) = self.compressor.clone();
         let compressed = func(data, self.level)?;
         Ok((name.clone(), compressed))
     }
 
-    pub(crate) fn decompress(&self, data: &[u8], decompressor: &str) -> Result<Vec<u8>, NPNGError> {
+    pub(crate) fn decompress(
+        &self,
+        data: Bytes,
+        decompressor: &str,
+    ) -> Result<BytesMut, NPNGError> {
         let func = self
             .decompressors
             .get(decompressor)
             .copied()
             .unwrap_or(Self::__plain_decompress);
-        Ok(func(data, if self.level > 0 { Some(self.level) } else { None })?)
+        Ok(func(
+            data,
+            if self.level > 0 {
+                Some(self.level)
+            } else {
+                None
+            },
+        )?)
     }
 
     // ===== Built-in functions =====
-    fn __plain_compress(data: &[u8], _level: u32) -> Result<Vec<u8>, NPNGCompressingError> {
-        Ok(data.to_vec())
+    fn __plain_compress(data: Bytes, _level: u32) -> Result<BytesMut, NPNGCompressingError> {
+        Ok(data.into())
     }
 
     fn __plain_decompress(
-        data: &[u8],
+        data: Bytes,
         _level: Option<u32>,
-    ) -> Result<Vec<u8>, NPNGCompressingError> {
-        Ok(data.to_vec())
+    ) -> Result<BytesMut, NPNGCompressingError> {
+        Ok(data.into())
     }
 
-    fn __zstd_compress(data: &[u8], level: u32) -> Result<Vec<u8>, NPNGCompressingError> {
+    fn __zstd_compress(data: Bytes, level: u32) -> Result<BytesMut, NPNGCompressingError> {
         spawn_zstd_compress(data, level)
             .map_err(|e| NPNGCompressingError::CompressingError(e.to_string()))
     }
 
     fn __zstd_decompress(
-        data: &[u8],
+        data: Bytes,
         _level: Option<u32>,
-    ) -> Result<Vec<u8>, NPNGCompressingError> {
+    ) -> Result<BytesMut, NPNGCompressingError> {
         spawn_zstd_decompress(data)
             .map_err(|e| NPNGCompressingError::DecompressingError(e.to_string()))
     }
 
-    fn __zlib_compress(data: &[u8], level: u32) -> Result<Vec<u8>, NPNGCompressingError> {
+    fn __zlib_compress(data: Bytes, level: u32) -> Result<BytesMut, NPNGCompressingError> {
         spawn_zlib_compress(data, level)
             .map_err(|e| NPNGCompressingError::CompressingError(e.to_string()))
     }
 
     fn __zlib_decompress(
-        data: &[u8],
+        data: Bytes,
         _level: Option<u32>,
-    ) -> Result<Vec<u8>, NPNGCompressingError> {
+    ) -> Result<BytesMut, NPNGCompressingError> {
         spawn_zlib_decompress(data)
             .map_err(|e| NPNGCompressingError::DecompressingError(e.to_string()))
     }
 
-    fn __xor_encoder(data: &[u8], key: u32) -> Result<Vec<u8>, NPNGCompressingError> {
+    fn __xor_encoder(data: Bytes, key: u32) -> Result<BytesMut, NPNGCompressingError> {
         let key_bytes = key.to_le_bytes();
         let key_len = key_bytes.len();
 
-        let mut result = data.to_vec();
+        let mut result: BytesMut = data.into();
 
         for (i, b) in result.iter_mut().enumerate() {
             *b ^= key_bytes[i % key_len];
@@ -135,22 +148,22 @@ impl CompressMap {
         Ok(result)
     }
 
-    fn __xor_decoder(data: &[u8], key: Option<u32>) -> Result<Vec<u8>, NPNGCompressingError> {
+    fn __xor_decoder(data: Bytes, key: Option<u32>) -> Result<BytesMut, NPNGCompressingError> {
         match key {
             Some(k) => {
                 let key_bytes = k.to_le_bytes();
                 let key_len = key_bytes.len();
-                let mut result = data.to_vec();
+                let mut result: BytesMut = data.into();
                 for (i, b) in result.iter_mut().enumerate() {
                     *b ^= key_bytes[i % key_len];
                 }
                 Ok(result)
             }
-            None => Err(NPNGCompressingError::DecompressingError("Empty key".to_string())),
+            None => Err(NPNGCompressingError::DecompressingError(
+                "Empty key".to_string(),
+            )),
         }
     }
-
-
 
     // ===== Constructors =====
     pub fn zstd(level: u32) -> Self {
@@ -216,12 +229,14 @@ impl CompressMap {
 
     pub fn set_xor_encoding(&mut self, key: u32) {
         self.set_level(key);
-        self.set_compressor("xor".to_string(), Self::__xor_encoder).unwrap()
+        self.set_compressor("xor".to_string(), Self::__xor_encoder)
+            .unwrap()
     }
 
     pub fn add_xor_decoding(&mut self, key: u32) {
         self.set_level(key);
-        self.add_decompressor("xor".to_string(), Self::__xor_decoder).unwrap()
+        self.add_decompressor("xor".to_string(), Self::__xor_decoder)
+            .unwrap()
     }
 
     pub fn xor(key: u32) -> Self {
@@ -233,7 +248,8 @@ impl CompressMap {
             decompressors: HashMap::new(),
             compressor: ("xor".to_string(), Self::__xor_encoder),
         };
-        s.add_decompressor("xor".to_string(), Self::__xor_decoder).unwrap();
+        s.add_decompressor("xor".to_string(), Self::__xor_decoder)
+            .unwrap();
         s
     }
 
@@ -241,4 +257,58 @@ impl CompressMap {
         self.add_zlib_decompress();
         self.add_zstd_decompress();
     }
+}
+
+pub(crate) fn spawn_zlib_compress(uncompressed: Bytes, level: u32) -> Result<BytesMut, NPNGError> {
+    if level > 9 {
+        return Err(NPNGError::Error("Invalid compression level".to_string()));
+    }
+
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(level));
+    encoder
+        .write_all(uncompressed.as_slice())
+        .map_err(|e| NPNGError::Error(format!("Zlib write failed: {}", e)))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|e| NPNGError::Error(format!("Zlib finish failed: {}", e)))?;
+
+    Ok(BytesMut::from(compressed.as_slice()))
+}
+
+pub(crate) fn spawn_zlib_decompress(compressed: Bytes) -> Result<BytesMut, NPNGError> {
+    let mut decoder = ZlibDecoder::new(Cursor::new(compressed));
+    let mut decompressed = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed)
+        .map_err(|e| NPNGError::Error(format!("Zlib decode failed: {}", e)))?;
+
+    Ok(BytesMut::from(decompressed.as_slice()))
+}
+
+pub(crate) fn spawn_zstd_compress(uncompressed: Bytes, level: u32) -> Result<BytesMut, NPNGError> {
+    if level > 22 {
+        return Err(NPNGError::Error(
+            "Unsupported compression level".to_string(),
+        ));
+    }
+
+    let mut encoder = zstd::Encoder::new(Vec::new(), level as i32)?;
+    encoder
+        .write_all(uncompressed.as_slice())
+        .map_err(|e| NPNGError::Error(format!("Zstd write failed: {}", e)))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|e| NPNGError::Error(format!("Zstd finish failed: {}", e)))?;
+
+    Ok(BytesMut::from(compressed.as_slice()))
+}
+
+pub(crate) fn spawn_zstd_decompress(compressed: Bytes) -> Result<BytesMut, NPNGError> {
+    let mut decoder = zstd::Decoder::new(Cursor::new(compressed))?;
+    let mut decompressed = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed)
+        .map_err(|e| NPNGError::Error(format!("Zstd decode failed: {}", e)))?;
+
+    Ok(BytesMut::from(decompressed.as_slice()))
 }
