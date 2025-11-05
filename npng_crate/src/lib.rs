@@ -3,6 +3,11 @@ compile_error!("32-bit system is not supported. Sorry"); // I don't want to supp
 
 extern crate std;
 
+use bytes::Bytes;
+use crc32fast::Hasher;
+use image::{GenericImageView, ImageBuffer, ImageReader, Pixel as TraitPx, Rgba};
+use log::warn;
+use std::str::FromStr;
 #[allow(dead_code)]
 #[allow(unused)]
 use std::{
@@ -13,22 +18,16 @@ use std::{
     io::{Read, Write},
     path::Path,
 };
-use std::str::FromStr;
-use bitvec::bitvec;
-use bytes::Bytes;
-use crc32fast::Hasher;
-use image::{GenericImageView, ImageBuffer, ImageReader, Pixel as TraitPx, Rgba};
-use log::warn;
 
 pub use crate::error::NPNGError;
+use crate::types::VersionMetadata;
+use crate::ver::VERSION_METADATA;
 use crate::{
     coding::{spawn_plain_decode_workers, spawn_plain_workers},
     types::{CheckSum, EncoderVersion, Header, Img, IntoCompressMap, Metadata, Pixel},
     utils::{check_image_size_f, deserialize, serialize},
     ver::{VERSION_MAJOR, VERSION_MINOR},
 };
-use crate::types::VersionMetadata;
-use crate::ver::VERSION_METADATA;
 
 mod coding;
 pub mod error;
@@ -152,7 +151,7 @@ pub fn encode_pixel_vec_with_metadata(
             let bit = idx % 8;
             let mask = 1 << bit;
             if bitmap[byte] & mask != 0 {
-                return Err(NPNGError::DuplicatePixel(p.x, p.y))
+                return Err(NPNGError::DuplicatePixel(p.x, p.y));
             }
             bitmap[byte] |= mask;
         }
@@ -324,7 +323,7 @@ pub fn encode_image_to_npng_pixels<P: AsRef<OsStr>>(
         encoder_version: EncoderVersion {
             version_major: VERSION_MAJOR,
             version_minor: VERSION_MINOR,
-            version_metadata: VersionMetadata::from_str(VERSION_METADATA)?
+            version_metadata: VersionMetadata::from_str(VERSION_METADATA)?,
         },
         data: metadata,
     })
@@ -544,9 +543,11 @@ pub fn decode_bytes_to_pixel_vec(
             let mut result = Img {
                 pixels: Vec::new(), // Empty vec, filling after pixel decoding
                 encoder_version: EncoderVersion {
-                    version_minor: header_decoded.version_minor,                                            //==============================================
-                    version_major: header_decoded.version_major,                                            //=== Construct a structure with versions
-                    version_metadata: VersionMetadata::from_str(header_decoded.version_metadata.as_str())?, //================================================
+                    version_minor: header_decoded.version_minor, //==============================================
+                    version_major: header_decoded.version_major, //=== Construct a structure with versions
+                    version_metadata: VersionMetadata::from_str(
+                        header_decoded.version_metadata.as_str(),
+                    )?, //================================================
                 },
                 data: header_decoded.metadata,
             };
@@ -568,7 +569,7 @@ pub fn decode_bytes_to_pixel_vec(
                     let bit = idx % 8;
                     let mask = 1 << bit;
                     if bitmap[byte] & mask != 0 {
-                        return Err(NPNGError::DuplicatePixel(p.x, p.y))
+                        return Err(NPNGError::DuplicatePixel(p.x, p.y));
                     }
                     bitmap[byte] |= mask;
                 }
