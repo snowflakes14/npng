@@ -1,14 +1,14 @@
+use bincode::{Decode, Encode};
 use std::collections::HashMap;
 use std::str::FromStr;
-use bincode::{Decode, Encode};
 
+use crate::ver::VERSION_METADATA;
 use crate::{
     Encoding, NPNGError,
     compress::CompressMap,
     utils::set_byte,
     ver::{VERSION_MAJOR, VERSION_MINOR},
 };
-use crate::ver::VERSION_METADATA;
 
 #[repr(C)]
 #[derive(Debug, Clone, Encode, Decode)]
@@ -179,10 +179,13 @@ impl Into<String> for VersionMetadata {
     }
 }
 
-
 impl EncoderVersion {
     pub fn version(&self) -> (u16, u16, VersionMetadata) {
-        (self.version_major, self.version_minor, self.version_metadata.clone())
+        (
+            self.version_major,
+            self.version_minor,
+            self.version_metadata.clone(),
+        )
     }
     pub fn version_major(&self) -> u16 {
         self.version_major
