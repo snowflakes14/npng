@@ -2,12 +2,10 @@ extern crate __tk_rt_private as tokio; // use renamed tokio as tokio
 
 use std::ffi::OsStr;
 
-use image::Rgba;
 use tokio::task;
 
 use crate::{
-    Config, Encoding, NPNGError,
-    compress::CompressMap,
+    Config, NPNGError,
     decode_bytes_to_image, decode_bytes_to_pixel_vec, decode_npng_image_to_image,
     encode_image_to_npng_bytes, encode_image_to_npng_image, encode_image_to_npng_pixels,
     encode_pixel_vec_to_npng_image, encode_pixel_vec_with_metadata,
