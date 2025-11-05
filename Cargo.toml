@@ -1,0 +1,5 @@
+[workspace]
+members = ["npng_crate"]
+resolver = "3"
+
+# Workspace for future update
