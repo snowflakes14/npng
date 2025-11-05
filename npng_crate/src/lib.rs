@@ -13,7 +13,7 @@ use std::{
     io::{Read, Write},
     path::Path,
 };
-
+use std::str::FromStr;
 use bitvec::bitvec;
 use bytes::Bytes;
 use crc32fast::Hasher;
@@ -27,6 +27,8 @@ use crate::{
     utils::{check_image_size_f, deserialize, serialize},
     ver::{VERSION_MAJOR, VERSION_MINOR},
 };
+use crate::types::VersionMetadata;
+use crate::ver::VERSION_METADATA;
 
 mod coding;
 pub mod error;
@@ -69,6 +71,7 @@ pub fn version() -> EncoderVersion {
     EncoderVersion {
         version_major: VERSION_MAJOR,
         version_minor: VERSION_MINOR,
+        version_metadata: VersionMetadata::from_str(VERSION_METADATA).unwrap(),
     }
 }
 
@@ -140,14 +143,19 @@ pub fn encode_pixel_vec_with_metadata(
     metadata.height = s.1;
 
     /* ===== Check for duplicate coordinates === */
-    let mut bitmap = bitvec![0; MAX_PIXELS];
+    {
+        let mut bitmap = vec![0u8; (MAX_PIXELS) / 8]; // 512 MB
 
-    for p in &pixels {
-        let idx = (p.y as usize) * SIZE + (p.x as usize);
-        if bitmap[idx] {
-            return Err(NPNGError::DuplicatePixel(p.x, p.y));
+        for p in &pixels {
+            let idx = (p.y as usize) * SIZE + (p.x as usize);
+            let byte = idx / 8;
+            let bit = idx % 8;
+            let mask = 1 << bit;
+            if bitmap[byte] & mask != 0 {
+                return Err(NPNGError::DuplicatePixel(p.x, p.y))
+            }
+            bitmap[byte] |= mask;
         }
-        bitmap.set(idx, true);
     }
 
     /* ===== Prepare buffer for entire image ===== */
@@ -316,6 +324,7 @@ pub fn encode_image_to_npng_pixels<P: AsRef<OsStr>>(
         encoder_version: EncoderVersion {
             version_major: VERSION_MAJOR,
             version_minor: VERSION_MINOR,
+            version_metadata: VersionMetadata::from_str(VERSION_METADATA)?
         },
         data: metadata,
     })
@@ -535,9 +544,9 @@ pub fn decode_bytes_to_pixel_vec(
             let mut result = Img {
                 pixels: Vec::new(), // Empty vec, filling after pixel decoding
                 encoder_version: EncoderVersion {
-                    version_minor: header_decoded.version_minor, //===========================================================================
-                    version_major: header_decoded.version_major, //=== Construct a structure with versions
-                                                                 //===========================================================================
+                    version_minor: header_decoded.version_minor,                                            //==============================================
+                    version_major: header_decoded.version_major,                                            //=== Construct a structure with versions
+                    version_metadata: VersionMetadata::from_str(header_decoded.version_metadata.as_str())?, //================================================
                 },
                 data: header_decoded.metadata,
             };
@@ -550,14 +559,19 @@ pub fn decode_bytes_to_pixel_vec(
                 return Err(NPNGError::Error("Pixel vec is too long".to_string()));
             }
             /* ===== Check for duplicate coordinates === */
-            let mut bitmap = bitvec![0; MAX_PIXELS];
+            {
+                let mut bitmap = vec![0u8; (MAX_PIXELS) / 8]; // 512 MB
 
-            for p in &decoded {
-                let idx = (p.y as usize) * SIZE + (p.x as usize);
-                if bitmap[idx] {
-                    return Err(NPNGError::DuplicatePixel(p.x, p.y));
+                for p in &decoded {
+                    let idx = (p.y as usize) * SIZE + (p.x as usize);
+                    let byte = idx / 8;
+                    let bit = idx % 8;
+                    let mask = 1 << bit;
+                    if bitmap[byte] & mask != 0 {
+                        return Err(NPNGError::DuplicatePixel(p.x, p.y))
+                    }
+                    bitmap[byte] |= mask;
                 }
-                bitmap.set(idx, true);
             }
 
             if check_image_size {

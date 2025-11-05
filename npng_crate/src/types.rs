@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-
+use std::str::FromStr;
 use bincode::{Decode, Encode};
 
 use crate::{
@@ -8,6 +8,7 @@ use crate::{
     utils::set_byte,
     ver::{VERSION_MAJOR, VERSION_MINOR},
 };
+use crate::ver::VERSION_METADATA;
 
 #[repr(C)]
 #[derive(Debug, Clone, Encode, Decode)]
@@ -15,6 +16,7 @@ pub struct Header {
     pub header: [u8; 9], // [0x00, 0x4E, 0x00, 0x50, 0x00, 0x4E, 0x00, 0x47, 0x00]
     pub version_major: u16,
     pub version_minor: u16,
+    pub version_metadata: String,
     pub del_h: [u8; 4], // [0x00, 0x00, 0x00, 0x00]
     pub alpha: bool,
     pub varint: bool,
@@ -63,6 +65,7 @@ impl Header {
             del_h: [0x00; 4],
             version_major: VERSION_MAJOR,
             version_minor: VERSION_MINOR,
+            version_metadata: VERSION_METADATA.to_string(),
             alpha,
             varint,
             reserved: [1; 8], // reserved for future use
@@ -144,17 +147,51 @@ impl Pixel {
 pub struct EncoderVersion {
     pub(crate) version_major: u16,
     pub(crate) version_minor: u16,
+    pub(crate) version_metadata: VersionMetadata,
 }
 
+#[derive(Debug, Clone)]
+pub enum VersionMetadata {
+    Experimental,
+    Beta,
+    Stable,
+}
+
+impl FromStr for VersionMetadata {
+    type Err = NPNGError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "experimental" => Ok(VersionMetadata::Experimental),
+            "beta" => Ok(VersionMetadata::Beta),
+            "stable" => Ok(VersionMetadata::Stable),
+            _ => Err(NPNGError::Error("Unknown version metadata".to_string())),
+        }
+    }
+}
+
+impl Into<String> for VersionMetadata {
+    fn into(self) -> String {
+        match self {
+            VersionMetadata::Experimental => "experimental".to_string(),
+            VersionMetadata::Beta => "beta".to_string(),
+            VersionMetadata::Stable => "stable".to_string(),
+        }
+    }
+}
+
+
 impl EncoderVersion {
-    pub fn version(&self) -> (u16, u16) {
-        (self.version_major, self.version_minor)
+    pub fn version(&self) -> (u16, u16, VersionMetadata) {
+        (self.version_major, self.version_minor, self.version_metadata.clone())
     }
     pub fn version_major(&self) -> u16 {
         self.version_major
     }
     pub fn version_minor(&self) -> u16 {
         self.version_minor
+    }
+    pub fn version_metadata(&self) -> VersionMetadata {
+        self.version_metadata.clone()
     }
 }
 

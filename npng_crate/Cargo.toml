@@ -1,10 +1,10 @@
 [package]
 name = "npng_crate"
-version = "0.1.1"
+version = "0.0.0-experimental"
 edition = "2024"
 
 authors = ["snowflakes14 <snowflakes1445@gmail.com>"]
-description = "Rust implementation of an image encoding format"
+description = "Rust implementation of an npng image encoding format"
 license = "Apache-2.0"
 categories = ["asynchronous", "encoding"]
 
