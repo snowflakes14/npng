@@ -41,6 +41,7 @@ pub struct Header {
     pub header: [u8; 9], // signature ([0x00, 0x4E, 0x00, 0x50, 0x00, 0x4E, 0x00, 0x47, 0x00])
     pub version_major: u8,
     pub version_minor: u16,
+    pub version_metadata: String,
     pub del: [u8; 4],
     pub alpha: bool,
     pub varint: bool,
