@@ -1,7 +1,7 @@
 # Npng
 
 Npng — an educational raster image storage format.  
-Implemented in Rust. The official library (lib) will be published later.
+Implemented in Rust. The official library (libnpng) is soon
 
 ------------------------------------------------------------
 
