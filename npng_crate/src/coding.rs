@@ -4,10 +4,9 @@ use std::sync::Arc;
 use bincode::config::{legacy, standard};
 use bytes::BytesMut;
 use rayon::prelude::*;
-
+use npng_core::error::NPNGError;
+use npng_core::{Pixel, RGBPixel};
 use crate::{
-    error::NPNGError,
-    types::{Pixel, RGBPixel},
     utils::encode_pixel,
 };
 

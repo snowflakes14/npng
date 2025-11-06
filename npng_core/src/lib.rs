@@ -1,14 +1,19 @@
+pub mod compress;
+pub mod error;
+
+pub mod ver;
+
 use bincode::{Decode, Encode};
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::str::FromStr;
 
 use crate::ver::VERSION_METADATA;
 use crate::{
-    Encoding, NPNGError,
     compress::CompressMap,
-    utils::set_byte,
     ver::{VERSION_MAJOR, VERSION_MINOR},
 };
+use crate::error::NPNGError;
 
 #[repr(C)]
 #[derive(Debug, Clone, Encode, Decode)]
@@ -145,9 +150,9 @@ impl Pixel {
 
 #[derive(Debug, Clone)]
 pub struct EncoderVersion {
-    pub(crate) version_major: u16,
-    pub(crate) version_minor: u16,
-    pub(crate) version_metadata: VersionMetadata,
+    pub version_major: u16,
+    pub version_minor: u16,
+    pub version_metadata: VersionMetadata,
 }
 
 #[derive(Debug, Clone)]
@@ -208,8 +213,34 @@ pub struct Img {
 #[repr(C)]
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct CheckSum {
-    pub(crate) del: [u8; 16],
-    pub(crate) crc32: u32,
+    pub del: [u8; 16],
+    pub crc32: u32,
+}
+
+pub const MAX_PIXELS: usize = SIZE * SIZE; // 4_294_967_296
+pub const SIZE: usize = 65536;
+
+#[derive(Debug, Clone)]
+pub enum Encoding {
+    Plain,    // no compressing (high file sze)
+    Zlib(u8), // max - 9
+    Zstd(u8), // max - 22
+}
+
+impl Default for Encoding {
+    fn default() -> Self {
+        Encoding::Zstd(16)
+    }
+}
+
+impl Display for Encoding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Encoding::Plain => f.write_str("plain"),
+            Encoding::Zlib(_) => f.write_str("zlib"),
+            Encoding::Zstd(_) => f.write_str("zstd"),
+        }
+    }
 }
 
 pub trait IntoCompressMap: Send + Sync {
@@ -230,4 +261,18 @@ impl IntoCompressMap for CompressMap {
     fn into_compress_map(self) -> Result<CompressMap, NPNGError> {
         Ok(self)
     }
+}
+
+pub(crate) fn set_byte<T>(mut a: T, n: u8, value: u8) -> T
+where
+    T: Copy
+    + std::ops::BitOr<Output = T>
+    + std::ops::BitAnd<Output = T>
+    + std::ops::Not<Output = T>
+    + std::ops::Shl<u8, Output = T>
+    + From<u8>,
+{
+    a = a & !(T::from(0xFF) << (n * 8));
+    a = a | (T::from(value) << (n * 8));
+    a
 }

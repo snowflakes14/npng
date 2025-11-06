@@ -1,5 +1,5 @@
 [workspace]
-members = ["npng_crate"]
+members = ["npng_crate", "npng_core"]
 resolver = "3"
 
 # Workspace for future update

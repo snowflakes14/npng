@@ -4,7 +4,7 @@ use image::ImageReader;
 
 extern crate npng_crate;
 
-use npng_crate::{compress::CompressMap, types::*, *};
+use npng_crate::{CompressMap, types::*, *};
 
 fn require_in_png() {
     let p = Path::new("in.png");

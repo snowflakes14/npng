@@ -7,7 +7,8 @@ use bytes::{Bytes, BytesMut};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use zstd::zstd_safe::WriteBuf;
 
-use crate::{NPNGError, error::NPNGCompressingError};
+use crate::{error::NPNGCompressingError};
+use crate::error::NPNGError;
 
 #[derive(Clone, Debug)]
 pub struct CompressMap {
@@ -71,13 +72,13 @@ impl CompressMap {
         Ok(())
     }
 
-    pub(crate) fn compress(&self, data: Bytes) -> Result<(String, BytesMut), NPNGError> {
+    pub fn compress(&self, data: Bytes) -> Result<(String, BytesMut), NPNGError> {
         let (name, func) = self.compressor.clone();
         let compressed = func(data, self.level)?;
         Ok((name.clone(), compressed))
     }
 
-    pub(crate) fn decompress(
+    pub fn decompress(
         &self,
         data: Bytes,
         decompressor: &str,

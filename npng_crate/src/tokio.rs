@@ -6,10 +6,11 @@ use tokio::task;
 
 use crate::{
     Config, NPNGError,
+    EncoderVersion,
     decode_bytes_to_image, decode_bytes_to_pixel_vec, decode_npng_image_to_image,
     encode_image_to_npng_bytes, encode_image_to_npng_image, encode_image_to_npng_pixels,
     encode_pixel_vec_to_npng_image, encode_pixel_vec_with_metadata,
-    types::{EncoderVersion, Img, IntoCompressMap, Metadata, Pixel},
+    types::{Img, IntoCompressMap, Metadata, Pixel},
 };
 
 /// Encode pixels -> NPNG bytes (blocking) on a tokio thread.

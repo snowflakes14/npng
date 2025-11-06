@@ -3,7 +3,7 @@ extern crate npng_crate;
 use std::{collections::HashMap, fs, path::Path};
 
 use image::ImageReader;
-use npng_crate::{compress::CompressMap, tokio::*, types::Metadata, *};
+use npng_crate::{CompressMap, tokio::*, types::Metadata, *};
 
 fn require_in_png() {
     let p = Path::new("in.png");

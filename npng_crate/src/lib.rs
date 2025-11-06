@@ -3,10 +3,12 @@ compile_error!("32-bit system is not supported. Sorry"); // I don't want to supp
 
 extern crate std;
 
+#[cfg(feature = "log")]
+use log::warn;
+
 use bytes::Bytes;
 use crc32fast::Hasher;
 use image::{GenericImageView, ImageBuffer, ImageReader, Pixel as TraitPx, Rgba};
-use log::warn;
 use std::str::FromStr;
 #[allow(dead_code)]
 #[allow(unused)]
@@ -19,52 +21,36 @@ use std::{
     path::Path,
 };
 
-pub use crate::error::NPNGError;
-use crate::types::VersionMetadata;
+pub use npng_core::error::NPNGError;
+use npng_core::{CheckSum, EncoderVersion, Header, Img, IntoCompressMap, Metadata, Pixel, MAX_PIXELS, SIZE};
 use crate::ver::VERSION_METADATA;
 use crate::{
     coding::{spawn_plain_decode_workers, spawn_plain_workers},
-    types::{CheckSum, EncoderVersion, Header, Img, IntoCompressMap, Metadata, Pixel},
     utils::{check_image_size_f, deserialize, serialize},
     ver::{VERSION_MAJOR, VERSION_MINOR},
 };
 
+pub use npng_core::compress::CompressMap;
+
+pub use npng_core::error::*;
+
+pub use npng_core::VersionMetadata;
+
+pub use npng_core::Encoding;
+
+pub mod types {
+    pub use npng_core::{Metadata, Pixel, IntoCompressMap, Img};
+}
+
 mod coding;
-pub mod error;
 
 #[cfg(feature = "tokio_async")]
 pub mod tokio;
 
-pub mod compress;
-pub mod types;
 mod utils;
 mod ver;
 
-const MAX_PIXELS: usize = SIZE * SIZE; // 4_294_967_296
-const SIZE: usize = 65536;
 
-#[derive(Debug, Clone)]
-pub enum Encoding {
-    Plain,    // no compressing (high file sze)
-    Zlib(u8), // max - 9
-    Zstd(u8), // max - 22
-}
-
-impl Default for Encoding {
-    fn default() -> Self {
-        Encoding::Zstd(16)
-    }
-}
-
-impl Display for Encoding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Encoding::Plain => f.write_str("plain"),
-            Encoding::Zlib(_) => f.write_str("zlib"),
-            Encoding::Zstd(_) => f.write_str("zstd"),
-        }
-    }
-}
 
 pub fn version() -> EncoderVersion {
     EncoderVersion {
@@ -536,7 +522,10 @@ pub fn decode_bytes_to_pixel_vec(
                 })?;
 
             if header_decoded.version_major != VERSION_MAJOR {
+                #[cfg(feature = "log")]
                 warn!("Image version differs from crate version");
+                #[cfg(not(feature = "log"))]
+                return Err(NPNGError::Error("Image version differs from crate version".to_string()));
             }
             let save_alpha = header_decoded.alpha;
             let varint = header_decoded.varint;

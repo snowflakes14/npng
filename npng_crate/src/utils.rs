@@ -2,11 +2,8 @@ use bincode::{
     Decode, Encode,
     config::{legacy, standard as std_config},
 };
-
-use crate::{
-    NPNGError,
-    types::{Pixel, RGBPixel},
-};
+use npng_core::{Pixel, RGBPixel};
+use npng_core::error::NPNGError;
 
 /// Serialize a value into a byte vector. (bincode wrapper)
 ///
