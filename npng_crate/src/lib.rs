@@ -22,7 +22,7 @@ use std::{
 };
 
 pub use npng_core::error::NPNGError;
-use npng_core::{CheckSum, EncoderVersion, Header, Img, IntoCompressMap, Metadata, Pixel, MAX_PIXELS, SIZE};
+use npng_core::{CheckSum, Header, Img, IntoCompressMap, Metadata, Pixel, MAX_PIXELS, SIZE};
 use crate::ver::VERSION_METADATA;
 use crate::{
     coding::{spawn_plain_decode_workers, spawn_plain_workers},
@@ -37,6 +37,8 @@ pub use npng_core::error::*;
 pub use npng_core::VersionMetadata;
 
 pub use npng_core::Encoding;
+
+pub use npng_core::EncoderVersion;
 
 pub mod types {
     pub use npng_core::{Metadata, Pixel, IntoCompressMap, Img};
