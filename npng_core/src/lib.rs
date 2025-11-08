@@ -243,25 +243,6 @@ impl Display for Encoding {
     }
 }
 
-pub trait IntoCompressMap: Send + Sync {
-    fn into_compress_map(self) -> Result<CompressMap, NPNGError>;
-}
-
-impl IntoCompressMap for Encoding {
-    fn into_compress_map(self) -> Result<CompressMap, NPNGError> {
-        Ok(match self {
-            Encoding::Plain => CompressMap::plain(),
-            Encoding::Zstd(l) => CompressMap::zstd(l as u32),
-            Encoding::Zlib(l) => CompressMap::zlib(l as u32),
-        })
-    }
-}
-
-impl IntoCompressMap for CompressMap {
-    fn into_compress_map(self) -> Result<CompressMap, NPNGError> {
-        Ok(self)
-    }
-}
 
 pub(crate) fn set_byte<T>(mut a: T, n: u8, value: u8) -> T
 where

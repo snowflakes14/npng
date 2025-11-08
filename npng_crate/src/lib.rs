@@ -22,7 +22,7 @@ use std::{
 };
 
 pub use npng_core::error::NPNGError;
-use npng_core::{CheckSum, Header, Img, IntoCompressMap, Metadata, Pixel, MAX_PIXELS, SIZE};
+use npng_core::{CheckSum, Header, Img, Metadata, Pixel, MAX_PIXELS, SIZE};
 use crate::ver::VERSION_METADATA;
 use crate::{
     coding::{spawn_plain_decode_workers, spawn_plain_workers},
@@ -41,7 +41,26 @@ pub use npng_core::Encoding;
 pub use npng_core::EncoderVersion;
 
 pub mod types {
-    pub use npng_core::{Metadata, Pixel, IntoCompressMap, Img};
+    pub use npng_core::{Metadata, Pixel, Img};
+}
+pub trait IntoCompressMap: Send + Sync {
+    fn into_compress_map(self) -> Result<CompressMap, NPNGError>;
+}
+
+impl IntoCompressMap for Encoding {
+    fn into_compress_map(self) -> Result<CompressMap, NPNGError> {
+        Ok(match self {
+            Encoding::Plain => CompressMap::plain(),
+            Encoding::Zstd(l) => CompressMap::zstd(l as u32),
+            Encoding::Zlib(l) => CompressMap::zlib(l as u32),
+        })
+    }
+}
+
+impl IntoCompressMap for CompressMap {
+    fn into_compress_map(self) -> Result<CompressMap, NPNGError> {
+        Ok(self)
+    }
 }
 
 mod coding;
