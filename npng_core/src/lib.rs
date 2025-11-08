@@ -220,28 +220,6 @@ pub struct CheckSum {
 pub const MAX_PIXELS: usize = SIZE * SIZE; // 4_294_967_296
 pub const SIZE: usize = 65536;
 
-#[derive(Debug, Clone)]
-pub enum Encoding {
-    Plain,    // no compressing (high file sze)
-    Zlib(u8), // max - 9
-    Zstd(u8), // max - 22
-}
-
-impl Default for Encoding {
-    fn default() -> Self {
-        Encoding::Zstd(16)
-    }
-}
-
-impl Display for Encoding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Encoding::Plain => f.write_str("plain"),
-            Encoding::Zlib(_) => f.write_str("zlib"),
-            Encoding::Zstd(_) => f.write_str("zstd"),
-        }
-    }
-}
 
 
 pub(crate) fn set_byte<T>(mut a: T, n: u8, value: u8) -> T
