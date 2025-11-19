@@ -34,7 +34,7 @@ fn get_test_configs() -> Vec<Config> {
 #[tokio::test]
 async fn test_encode_image_to_npng_image_with_configs_tokio() {
     require_in_png();
-    let metadata = Metadata::new_str("TEST", HashMap::new());
+    let metadata = Metadata::new("TEST", HashMap::new());
     let out_path = "out.npng";
 
     let compress_maps = vec![
@@ -72,7 +72,7 @@ async fn test_encode_image_to_npng_image_with_configs_tokio() {
 #[tokio::test]
 async fn test_encode_bytes_and_decode_bytes_roundtrip_with_configs_tokio() {
     require_in_png();
-    let metadata = Metadata::new_str("TEST", HashMap::new());
+    let metadata = Metadata::new("TEST", HashMap::new());
     let compress_maps = vec![
         CompressMap::plain(),
         CompressMap::zlib(3),

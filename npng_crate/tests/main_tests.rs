@@ -36,7 +36,7 @@ fn get_test_configs() -> Vec<Config> {
 #[test]
 fn test_encode_image_to_npng_image_with_configs() {
     require_in_png();
-    let metadata = Metadata::new_str("TEST", HashMap::new());
+    let metadata = Metadata::new("TEST", HashMap::new());
     let out_path = "out.npng";
 
     let compress_maps = vec![
@@ -87,7 +87,7 @@ fn test_encode_bytes_and_decode_bytes_roundtrip_with_configs() {
         .expect("cannot guess format");
     let _img = reader.decode().expect("cannot decode in.png");
 
-    let metadata = Metadata::new_str("TEST", HashMap::new());
+    let metadata = Metadata::new("TEST", HashMap::new());
 
     let compress_maps = vec![
         CompressMap::plain(),
@@ -141,7 +141,7 @@ fn test_coordinates_duplicates() {
 
     let r = encode_pixel_vec_with_metadata(
         pixels,
-        Metadata::new_str("TEST", HashMap::new()),
+        Metadata::new("TEST", HashMap::new()),
         Config::default(),
         Encoding::Plain,
     );
