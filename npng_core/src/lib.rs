@@ -91,7 +91,7 @@ pub struct Metadata {
 }
 
 impl Metadata {
-    pub fn new(created_in: String, extra: HashMap<String, String>) -> Self {
+    pub fn new_string(created_in: String, extra: HashMap<String, String>) -> Self {
         Metadata {
             created_in,
             width: 0,
@@ -99,9 +99,20 @@ impl Metadata {
             extra,
         }
     }
+    pub fn new(created_in: impl Into<String>, extra: HashMap<impl Into<String>, impl Into<String>>) -> Self {
+        Metadata {
+            created_in: created_in.into(),
+            width: 0,
+            height: 0,
+            extra: extra
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+        }
+    }
     pub fn new_str(created_in: &str, extra: HashMap<&str, &str>) -> Self {
         Metadata {
-            created_in: String::from(created_in),
+            created_in: created_in.to_string(),
             width: 0,
             height: 0,
             extra: extra
