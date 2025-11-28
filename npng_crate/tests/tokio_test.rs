@@ -1,9 +1,9 @@
 extern crate __tk_rt_private as tokio;
 extern crate npng_crate;
 use std::{collections::HashMap, fs, path::Path};
-use npng_crate::compression::CompressMap;
-use npng_crate::Config;
-use npng_crate::types::metadata::Metadata;
+
+use image::ImageReader;
+use npng_crate::{compression::CompressMap, tokio::*, types::metadata::Metadata, *};
 
 fn require_in_png() {
     let p = Path::new("in.png");
