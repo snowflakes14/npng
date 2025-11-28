@@ -5,7 +5,7 @@ pub const VERSION_MINOR: u16 = 0;
 ///
 /// `Experimental` - backward compatibility is not guaranteed + unstable
 ///
-/// `Beta` - unstable version with a lot of bugs
+/// `Beta` - unstable version
 ///
 /// `Stable` - stable version
 pub const VERSION_METADATA: &str = "Experimental";

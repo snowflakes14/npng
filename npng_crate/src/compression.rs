@@ -5,7 +5,6 @@ use std::{
 
 use bytes::{Bytes, BytesMut};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
-use zstd::zstd_safe::WriteBuf;
 
 use crate::{error::NPNGCompressingError};
 use crate::error::NPNGError;
@@ -267,7 +266,7 @@ pub(crate) fn spawn_zlib_compress(uncompressed: Bytes, level: u32) -> Result<Byt
 
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(level));
     encoder
-        .write_all(uncompressed.as_slice())
+        .write_all(&uncompressed.to_vec())
         .map_err(|e| NPNGError::Error(format!("Zlib write failed: {}", e)))?;
     let compressed = encoder
         .finish()
@@ -295,7 +294,7 @@ pub(crate) fn spawn_zstd_compress(uncompressed: Bytes, level: u32) -> Result<Byt
 
     let mut encoder = zstd::Encoder::new(Vec::new(), level as i32)?;
     encoder
-        .write_all(uncompressed.as_slice())
+        .write_all(&uncompressed.to_vec())
         .map_err(|e| NPNGError::Error(format!("Zstd write failed: {}", e)))?;
     let compressed = encoder
         .finish()

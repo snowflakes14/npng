@@ -4,7 +4,8 @@ use image::ImageReader;
 
 extern crate npng_crate;
 
-use npng_crate::{CompressMap, types::*, *};
+use npng_crate::{compression::CompressMap, types::{metadata::Metadata}, *};
+use npng_crate::error::NPNGError;
 
 fn require_in_png() {
     let p = Path::new("in.png");
@@ -41,8 +42,8 @@ fn test_encode_image_to_npng_image_with_configs() {
 
     let compress_maps = vec![
         CompressMap::plain(),
-        CompressMap::zlib(3),
-        CompressMap::zstd(1),
+        CompressMap::zlib(6),
+        CompressMap::zstd(6),
     ];
 
     for (i, config) in get_test_configs().iter().enumerate() {

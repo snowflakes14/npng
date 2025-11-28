@@ -20,9 +20,7 @@ use std::{
     io::{Read, Write},
     path::Path,
 };
-
-pub use npng_core::error::NPNGError;
-use npng_core::{CheckSum, Header, Img, Metadata, Pixel, MAX_PIXELS, SIZE};
+use crate::types::{CheckSum, SIZE};
 use crate::ver::VERSION_METADATA;
 use crate::{
     coding::{spawn_plain_decode_workers, spawn_plain_workers},
@@ -30,18 +28,29 @@ use crate::{
     ver::{VERSION_MAJOR, VERSION_MINOR},
 };
 
-pub use npng_core::compress::CompressMap;
+pub use crate::types::Img;
+pub use crate::types::VersionMetadata;
+pub use crate::types::EncoderVersion;
 
-pub use npng_core::error::*;
+use crate::types::metadata::Metadata;
+use crate::types::header::Header;
+pub use crate::types::pixel::Pixel;
 
-pub use npng_core::VersionMetadata;
+use crate::compression::CompressMap;
 
-pub use npng_core::EncoderVersion;
+use crate::error::*;
+use crate::types::MAX_PIXELS;
 
-pub mod types {
-    pub use npng_core::{Metadata, Pixel, Img};
-}
+mod coding;
 
+#[cfg(feature = "tokio_async")]
+pub mod tokio;
+
+mod utils;
+mod ver;
+pub mod types;
+pub mod compression;
+pub mod error;
 
 #[derive(Debug, Clone)]
 pub enum Encoding {
@@ -86,28 +95,32 @@ impl IntoCompressMap for CompressMap {
     }
 }
 
-mod coding;
-
-#[cfg(feature = "tokio_async")]
-pub mod tokio;
-
-mod utils;
-mod ver;
-
-
-
-pub fn version() -> EncoderVersion {
-    EncoderVersion {
-        version_major: VERSION_MAJOR,
-        version_minor: VERSION_MINOR,
-        version_metadata: VersionMetadata::from_str(VERSION_METADATA).unwrap(),
+impl<T: Into<String> + Sync + Send> IntoCompressMap for T {
+    fn into_compress_map(self) -> Result<CompressMap, NPNGError> {
+        let s = self.into();
+        match s.to_lowercase().trim() {
+            "default" => Ok(CompressMap::default()),
+            "plain" => Ok(CompressMap::plain()),
+            "none" => Ok(CompressMap::plain()),
+            "zlib" => Ok(CompressMap::zlib(6)),
+            "zstd" => Ok(CompressMap::zstd(16)),
+            _ => Err(NPNGError::Error("Unknown compressing".to_string())),
+        }
     }
 }
+
+
 
 #[derive(Debug, Clone)]
 pub struct Config {
     pub save_alpha: bool,
     pub varint: bool,
+}
+
+impl Display for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "save_alpha={}\nvarint={}", self.save_alpha, self.varint)
+    }
 }
 
 impl Config {
@@ -125,6 +138,14 @@ impl Default for Config {
     }
 }
 
+pub fn version() -> EncoderVersion {
+    EncoderVersion {
+        version_major: VERSION_MAJOR,
+        version_minor: VERSION_MINOR,
+        version_metadata: VersionMetadata::from_str(VERSION_METADATA).unwrap(),
+    }
+}
+
 /// Encodes a vector of pixels with metadata into NPNG bytes.
 ///
 /// # Parameters
@@ -133,7 +154,7 @@ impl Default for Config {
 ///   automatically based on the pixels.
 /// - `config` - Encoding options [`Config`]:
 ///     - `save_alpha` - Whether to include the alpha channel in the output. Fully opaque
-///       pixels may be skipped if false.
+///       pixels don't saving
 ///     - `varint` - Whether to use variable-length integer encoding for pixel data.
 /// - `compress_map` - Compression map
 ///
@@ -148,11 +169,11 @@ impl Default for Config {
 /// # Returns
 /// - `Ok(Vec<u8>)` - Encoded NPNG bytes ready for storage or transmission.
 /// - `Err(NPNGError)` - If encoding fails, duplicate pixels are found, or the header is too long.
-pub fn encode_pixel_vec_with_metadata(
+pub fn encode_pixel_vec_with_metadata<C: IntoCompressMap>(
     pixels: Vec<Pixel>,
     mut metadata: Metadata,
     config: Config,
-    compress_map: impl IntoCompressMap,
+    compress_map: C,
 ) -> Result<Vec<u8>, NPNGError> {
     if pixels.len() > MAX_PIXELS {
         return Err(NPNGError::Error(format!(
@@ -229,7 +250,7 @@ pub fn encode_pixel_vec_with_metadata(
 ///   based on the actual image dimensions.
 /// - `config` - Encoding options (`Config`):
 ///     - `save_alpha` - Whether to include the alpha channel in the output. Fully opaque
-///       pixels may be skipped if false to reduce size.
+///       pixels are not saved
 ///     - `varint` - Use variable-length integer encoding for pixel data.
 /// - `compress_map` - Compression context used for encoding pixel data and header.
 ///
@@ -243,11 +264,11 @@ pub fn encode_pixel_vec_with_metadata(
 /// # Returns
 /// - `Ok(Vec<u8>)` - Encoded NPNG bytes ready for storage or transmission.
 /// - `Err(NPNGError)` - If opening, decoding, or encoding the image fails.
-pub fn encode_image_to_npng_bytes<P: AsRef<OsStr>>(
+pub fn encode_image_to_npng_bytes<P: AsRef<OsStr>, C: IntoCompressMap>(
     input: P,
     mut metadata: Metadata,
     config: Config,
-    compress_map: impl IntoCompressMap,
+    compress_map: C,
 ) -> Result<Vec<u8>, NPNGError> {
     let compress_map = compress_map.into_compress_map()?;
     /* ===== Open Image ===== */
@@ -284,6 +305,7 @@ pub fn encode_image_to_npng_bytes<P: AsRef<OsStr>>(
 
     metadata.width = width as u16;
     metadata.height = height as u16;
+
 
     encode_pixel_vec_with_metadata(pixels, metadata, config, compress_map)
 }
@@ -355,7 +377,7 @@ pub fn encode_image_to_npng_pixels<P: AsRef<OsStr>>(
             version_minor: VERSION_MINOR,
             version_metadata: VersionMetadata::from_str(VERSION_METADATA)?,
         },
-        data: metadata,
+        metadata: metadata,
     })
 }
 
@@ -384,13 +406,13 @@ pub fn encode_image_to_npng_pixels<P: AsRef<OsStr>>(
 /// - `Ok(())` - Image successfully encoded and saved.
 /// - `Err(NPNGError)` - If encoding fails or writing to the file fails.
 
-pub fn encode_pixel_vec_to_npng_image<O: AsRef<OsStr>>(
+pub fn encode_pixel_vec_to_npng_image<O: AsRef<OsStr>, C: IntoCompressMap>(
     output: O, // output file path
     metadata: Metadata,
     pixels: Vec<Pixel>,
     overwrite: bool,
     config: Config,
-    compress_map: impl IntoCompressMap,
+    compress_map: C,
 ) -> Result<(), NPNGError> {
     let compress_map = compress_map.into_compress_map()?;
 
@@ -440,13 +462,13 @@ pub fn encode_pixel_vec_to_npng_image<O: AsRef<OsStr>>(
 /// # Returns
 /// - `Ok(())` - Image successfully encoded and saved.
 /// - `Err(NPNGError)` - If reading, decoding, encoding, or writing fails.
-pub fn encode_image_to_npng_image<I: AsRef<OsStr>, O: AsRef<OsStr>>(
+pub fn encode_image_to_npng_image<I: AsRef<OsStr>, O: AsRef<OsStr>, C: IntoCompressMap>(
     input: I,
     output: O,
     metadata: Metadata,
     overwrite: bool,
     config: Config,
-    compress_map: impl IntoCompressMap,
+    compress_map: C,
 ) -> Result<(), NPNGError> {
     let compress_map = compress_map.into_compress_map()?;
 
@@ -470,6 +492,14 @@ pub fn encode_image_to_npng_image<I: AsRef<OsStr>, O: AsRef<OsStr>>(
     file.write_all(&ser)?;
 
     Ok(())
+}
+
+pub fn encode_img_to_npng_bytes<C: IntoCompressMap>(
+    img: Img,
+    config: Config,
+    compress_map: C,
+) -> Result<Vec<u8>, NPNGError> {
+    encode_pixel_vec_with_metadata(img.pixels, img.metadata, config, compress_map)
 }
 
 /// Decodes NPNG bytes into a vector of [`Pixel`]s along with metadata (`Img`).
@@ -496,11 +526,11 @@ pub fn encode_image_to_npng_image<I: AsRef<OsStr>, O: AsRef<OsStr>>(
 /// # Returns
 /// - `Ok(Img)` - Successfully decoded image as an `Img` structure.
 /// - `Err(NPNGError)` - If the header is invalid, checksum fails, decompression fails, or pixel decoding fails.
-pub fn decode_bytes_to_pixel_vec(
+pub fn decode_bytes_to_pixel_vec<C: IntoCompressMap>(
     bytes: &[u8],
     check_image_size: bool,
     ignore_checksum: bool,
-    compress_map: impl IntoCompressMap,
+    compress_map: C,
 ) -> Result<Img, NPNGError> {
     let compress_map = compress_map.into_compress_map()?;
 
@@ -512,7 +542,7 @@ pub fn decode_bytes_to_pixel_vec(
     // Split the header into magic bytes and the rest
     let magic_bytes = bytes.split_at(9);
     if magic_bytes.0 != [0x00, 0x4E, 0x00, 0x50, 0x00, 0x4E, 0x00, 0x47, 0x00] {
-        return Err(NPNGError::InvalidHeader("Invalid magic bytes".to_string())); // Return err if magic bytes not . N . P . N . G .
+        return Err(NPNGError::InvalidHeader("Invalid magic bytes".to_string())); // Return err if magic bytes not .. N .. P .. N .. G ..
     }
 
     /* ===== Get CRC32 Checksum stored in file ===== */
@@ -546,7 +576,7 @@ pub fn decode_bytes_to_pixel_vec(
 
     match header_end_pos {
         Some(end) => {
-            let header = &bytes[..end]; // header including FF FF FF FF FF FF
+            let header = &bytes[..end]; // header including delimiter
             if header.len() > 10_000 {
                 return Err(NPNGError::InvalidHeader("Header is too long".to_string())); // Return Err if header is too long (>10KB)
             }
@@ -578,11 +608,11 @@ pub fn decode_bytes_to_pixel_vec(
                 encoder_version: EncoderVersion {
                     version_minor: header_decoded.version_minor, //==============================================
                     version_major: header_decoded.version_major, //=== Construct a structure with versions
-                    version_metadata: VersionMetadata::from_str(
+                    version_metadata: VersionMetadata::from_str( //================================================
                         header_decoded.version_metadata.as_str(),
-                    )?, //================================================
+                    )?,
                 },
-                data: header_decoded.metadata,
+                metadata: header_decoded.metadata,
             };
 
             let format = header_decoded.encoding_format.clone();
@@ -610,8 +640,8 @@ pub fn decode_bytes_to_pixel_vec(
 
             if check_image_size {
                 let real_size = check_image_size_f(decoded.clone());
-                result.data.width = real_size.0;
-                result.data.height = real_size.1;
+                result.metadata.width = real_size.0;
+                result.metadata.height = real_size.1;
             }
 
             result.pixels = decoded;
@@ -638,20 +668,20 @@ pub fn decode_bytes_to_pixel_vec(
 /// # Returns
 /// - `Ok((EncoderVersion, Metadata))` - Tuple containing the encoder version and image metadata.
 /// - `Err(NPNGError)` - If decoding fails or saving the image fails.
-pub fn decode_bytes_to_image<O: AsRef<OsStr>>(
+pub fn decode_bytes_to_image<O: AsRef<OsStr>, C: IntoCompressMap>(
     bytes: &[u8],
     output: O,
     ignore_checksum: bool,
-    compress_map: impl IntoCompressMap,
+    compress_map: C,
 ) -> Result<(EncoderVersion, Metadata), NPNGError> {
     let compress_map = compress_map.into_compress_map()?;
 
     let img = decode_bytes_to_pixel_vec(bytes, true, ignore_checksum, compress_map)?;
-    let metadata = img.data.clone();
+    let metadata = img.metadata.clone();
     let version = img.encoder_version.clone();
 
-    let width = img.data.width as u32;
-    let height = img.data.height as u32;
+    let width = img.metadata.width as u32;
+    let height = img.metadata.height as u32;
 
     let mut buffer = ImageBuffer::<Rgba<u8>, Vec<u8>>::new(width, height);
 
@@ -693,11 +723,11 @@ pub fn decode_bytes_to_image<O: AsRef<OsStr>>(
 /// # Returns
 /// - `Ok((EncoderVersion, Metadata))` - Tuple containing the encoder version and image metadata.
 /// - `Err(NPNGError)` - If reading, decoding, or saving the image fails.
-pub fn decode_npng_image_to_image<I: AsRef<OsStr>, O: AsRef<OsStr>>(
+pub fn decode_npng_image_to_image<I: AsRef<OsStr>, O: AsRef<OsStr>, C: IntoCompressMap>(
     input: I,
     output: O,
     ignore_checksum: bool,
-    compress_map: impl IntoCompressMap,
+    compress_map: C,
 ) -> Result<(EncoderVersion, Metadata), NPNGError> {
     let compress_map = compress_map.into_compress_map()?;
 
@@ -720,11 +750,11 @@ pub fn decode_npng_image_to_image<I: AsRef<OsStr>, O: AsRef<OsStr>>(
 /// # Returns
 /// - `Ok(Img)` - Successfully decoded image as an `Img` structure containing pixels and metadata.
 /// - `Err(NPNGError)` - If reading the file, decoding, or decompression fails.
-pub fn decode_npng_file_to_pixels<I: AsRef<OsStr>>(
+pub fn decode_npng_file_to_pixels<I: AsRef<OsStr>, C: IntoCompressMap>(
     input: I,
     check_image_size: bool,
     ignore_checksum: bool,
-    compress_map: impl IntoCompressMap,
+    compress_map: C,
 ) -> Result<Img, NPNGError> {
     let compress_map = compress_map.into_compress_map()?;
 
@@ -747,17 +777,17 @@ pub fn decode_npng_file_to_pixels<I: AsRef<OsStr>>(
 /// # Returns
 /// - `Ok((ImageBuffer<Rgba<u8>, Vec<u8>>, Metadata))` - Decoded image buffer and metadata.
 /// - `Err(NPNGError)` - If decoding or decompression fails.
-pub fn decode_npng_bytes_to_image_buffer(
+pub fn decode_npng_bytes_to_image_buffer<C: IntoCompressMap>(
     bytes: &[u8],
     ignore_checksum: bool,
-    compress_map: impl IntoCompressMap,
+    compress_map: C,
 ) -> Result<(ImageBuffer<Rgba<u8>, Vec<u8>>, Metadata), NPNGError> {
     let compress_map = compress_map.into_compress_map()?;
 
     let img = decode_bytes_to_pixel_vec(bytes, true, ignore_checksum, compress_map)?;
 
-    let width = img.data.width as u32;
-    let height = img.data.height as u32;
+    let width = img.metadata.width as u32;
+    let height = img.metadata.height as u32;
 
     let mut buffer = ImageBuffer::<Rgba<u8>, Vec<u8>>::new(width, height);
 
@@ -773,7 +803,7 @@ pub fn decode_npng_bytes_to_image_buffer(
         buffer.put_pixel(x, y, Rgba([r, g, b, a]));
     }
 
-    Ok((buffer, img.data))
+    Ok((buffer, img.metadata))
 }
 
 /// Decodes an NPNG file into a raw RGBA byte vector along with image dimensions.
@@ -792,10 +822,10 @@ pub fn decode_npng_bytes_to_image_buffer(
 /// # Returns
 /// - `Ok((Vec<u8>, u32, u32))` - Raw RGBA bytes, width, and height of the decoded image.
 /// - `Err(NPNGError)` - If reading, decoding, or decompression fails.
-pub fn decode_npng_file_to_rgba_vec<I: AsRef<OsStr>>(
+pub fn decode_npng_file_to_rgba_vec<I: AsRef<OsStr>, C: IntoCompressMap>(
     input: I,
     ignore_checksum: bool,
-    compress_map: impl IntoCompressMap,
+    compress_map: C,
 ) -> Result<(Vec<u8>, u32, u32), NPNGError> {
     let compress_map = compress_map.into_compress_map()?;
 

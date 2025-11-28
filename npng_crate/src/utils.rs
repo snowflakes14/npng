@@ -2,8 +2,9 @@ use bincode::{
     Decode, Encode,
     config::{legacy, standard as std_config},
 };
-use npng_core::{Pixel, RGBPixel};
-use npng_core::error::NPNGError;
+use crate::Pixel;
+use crate::error::NPNGError;
+use crate::types::pixel::RGBPixel;
 
 /// Serialize a value into a byte vector. (bincode wrapper)
 ///
@@ -100,4 +101,19 @@ pub(crate) fn check_image_size_f(pixels: Vec<Pixel>) -> (u16, u16) {
     let width = pixels.iter().map(|p| p.x).max().unwrap_or(0) + 1;
     let height = pixels.iter().map(|p| p.y).max().unwrap_or(0) + 1;
     (width, height)
+}
+
+
+pub(crate) fn set_byte<T>(mut a: T, n: u8, value: u8) -> T
+where
+    T: Copy
+    + std::ops::BitOr<Output = T>
+    + std::ops::BitAnd<Output = T>
+    + std::ops::Not<Output = T>
+    + std::ops::Shl<u8, Output = T>
+    + From<u8>,
+{
+    a = a & !(T::from(0xFF) << (n * 8));
+    a = a | (T::from(value) << (n * 8));
+    a
 }
