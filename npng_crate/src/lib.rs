@@ -448,10 +448,6 @@ pub fn encode_pixel_vec_to_npng_image<O: AsRef<OsStr>, C: IntoCompressMap>(
 /// - `config` - [`Config`] containing encoding options:
 ///     - `save_alpha` - Whether to save the alpha channel. Fully opaque pixels may be skipped to reduce file size.
 ///     - `varint` - Use variable-length integer encoding for pixel data.
-///     - `encoding` - Pixel compression method ([`Encoding`]):
-///         - [`Encoding::Plain`] - No compression.
-///         - [`Encoding::Zlib`]  - Compress using zlib.
-///         - [`Encoding::Zstd`]  - Compress using zstd.
 /// - `compress_map` - Compression context used for encoding pixel data and header.
 ///
 /// # Behavior
@@ -558,7 +554,7 @@ pub fn decode_bytes_to_pixel_vec<C: IntoCompressMap>(
             Ok(c) => c,
             Err(_) => {
                 // Return error if checksum is bad
-                return Err(NPNGError::InvalidChecksum("invalid checksum".to_string()));
+                return Err(NPNGError::InvalidChecksum("broken checksum section".to_string()));
             }
         };
 
